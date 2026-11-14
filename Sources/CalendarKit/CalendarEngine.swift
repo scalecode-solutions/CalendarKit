@@ -296,6 +296,9 @@ public final class CalendarEngine {
             }
             for l in d.labels { store.putLabel(l) }
             for id in d.deletedLabelIDs { store.removeLabel(id) }
+            // loadFrom stays set until a page says has_more is false. If that
+            // last answer is lost, the next delta still carries it; that's safe
+            // (loadFrom ≤ rev, so the server only judges purges more strictly).
             store.setCursor(d.calendarID, d.rev, loadFrom: d.loadFrom)
         }
         for a in page.alerts { store.putAlert(a) }
@@ -305,20 +308,31 @@ public final class CalendarEngine {
 
     // MARK: the write queue
 
+    /// The queued write being sent right now. enqueue() never merges into or
+    /// drops it: a change made while it's on the wire is queued after it (and
+    /// rebased onto its answer), or it would be lost when it lands.
+    private var inFlight: UUID?
+
     private func flush(_ gen: Int) async {
         guard let store else { return }
-        for (pid, w) in store.pending() {
-            guard gen == generation else { return }
+        // Re-read the queue before each write: a refused write drops the ones
+        // built on it, and writes made meanwhile join the end.
+        for _ in 0..<1000 {
+            guard gen == generation, let (pid, w) = store.pending().first else { return }
+            inFlight = pid
             do {
-                try await perform(w, store: store)
+                try await perform(w, pid: pid, store: store)
+                inFlight = nil
                 guard gen == generation else { return }
                 store.dropPending(pid)
             } catch let e as CalTransportError where e.isRetryable {
+                inFlight = nil
                 store.bumpAttempts(pid)
                 store.save()
                 lastError = Self.describe(e)
                 break // keep the order: everything after waits too
             } catch {
+                inFlight = nil
                 guard gen == generation else { return }
                 store.dropPending(pid)
                 refused(w, error: error, store: store)
@@ -329,28 +343,62 @@ public final class CalendarEngine {
         }
     }
 
+    /// What the server answered for an event, applied: later queued writes
+    /// about it were built on the rev it had then, so they're rebased onto this
+    /// one. While any are still waiting, the local copy (which already shows
+    /// them) keeps its fields and takes only the new rev; an event deleted
+    /// locally meanwhile isn't brought back.
+    private func landed(_ e: CalEvent, after pid: UUID, store: CalendarStore) {
+        let waiting = rebase(e.id, to: e.rev, after: pid, store: store)
+        guard waiting else { return store.put(e, pending: true) }
+        guard var local = store.event(e.id) else { return }
+        local.rev = e.rev
+        local.createdBy = e.createdBy
+        local.createdAt = e.createdAt
+        store.put(local, pending: true)
+    }
+
+    /// Point later queued writes about `id` at `rev`. Returns whether any wait.
+    @discardableResult
+    private func rebase(_ id: UUID, to rev: Int64, after pid: UUID, store: CalendarStore) -> Bool {
+        var waiting = false
+        for (qpid, q) in store.pending() where qpid != pid {
+            switch q {
+            case .update(let qid, _, let f) where qid == id:
+                store.replacePending(qpid, with: .update(id: qid, baseRev: rev, fields: f)); waiting = true
+            case .delete(let qid, _) where qid == id:
+                store.replacePending(qpid, with: .delete(id: qid, baseRev: rev)); waiting = true
+            case .split(let m, _, let at, let ns, let discard) where m == id:
+                store.replacePending(qpid, with: .split(masterID: m, baseRev: rev, at: at, newSeries: ns, discardNew: discard)); waiting = true
+            default:
+                if q.eventID == id { waiting = true }
+            }
+        }
+        return waiting
+    }
+
     /// Send one write and apply what the server answered.
-    private func perform(_ w: PendingWrite, store: CalendarStore) async throws {
+    private func perform(_ w: PendingWrite, pid: UUID, store: CalendarStore) async throws {
         switch w {
         case .create(let e):
-            store.put(try await transport.createEvent(id: e.id, calendarID: e.calendarID, fields: e.fields), pending: true)
+            landed(try await transport.createEvent(id: e.id, calendarID: e.calendarID, fields: e.fields), after: pid, store: store)
         case .exception(let e):
             let saved = try await transport.createException(id: e.id, calendarID: e.calendarID, masterID: e.masterID!,
                                                             originalStart: e.originalStart!, fields: e.fields, cancelled: e.cancelled)
-            store.put(saved, pending: true)
+            landed(saved, after: pid, store: store)
         case .update(let id, let base, let fields):
-            store.put(try await transport.updateEvent(id: id, baseRev: base, fields: fields), pending: true)
+            landed(try await transport.updateEvent(id: id, baseRev: base, fields: fields), after: pid, store: store)
         case .delete(let id, let base):
             _ = try await transport.deleteEvent(id: id, baseRev: base)
             store.removeEvent(id)
             store.removeExceptions(of: id)
         case .split(let master, let base, let at, let s, let discardNew):
             let r = try await transport.splitSeries(masterID: master, baseRev: base, at: at, newID: s.id, fields: s.fields)
-            store.put(r.old, pending: true)
+            landed(r.old, after: pid, store: store)
             if discardNew {
                 _ = try await transport.deleteEvent(id: r.new.id, baseRev: r.new.rev)
             } else {
-                store.put(r.new, pending: true)
+                landed(r.new, after: pid, store: store)
             }
         case .alerts(let id, let minutes):
             store.putAlert(try await transport.setAlerts(eventID: id, minutesBefore: minutes))
@@ -414,7 +462,8 @@ public final class CalendarEngine {
 
     /// Queue a write, merging it into one already waiting for the same event.
     private func enqueue(_ w: PendingWrite, store: CalendarStore) {
-        let queued = store.pending()
+        // Never merge into, or drop, the write on the wire.
+        let queued = store.pending().filter { $0.0 != inFlight }
         switch w {
         case .update(let id, _, let fields):
             for (pid, q) in queued {
@@ -434,6 +483,9 @@ public final class CalendarEngine {
         case .delete(let id, _):
             var sawCreate = false
             for (pid, q) in queued where q.eventID == id {
+                // A split made another series that still has to happen; the
+                // delete of this one is rebased onto the split's answer.
+                if case .split = q { continue }
                 if case .create = q { sawCreate = true }
                 if case .exception = q { sawCreate = true }
                 if case .update(_, let base, _) = q {

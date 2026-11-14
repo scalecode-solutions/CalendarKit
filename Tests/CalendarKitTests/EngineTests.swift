@@ -591,3 +591,128 @@ struct PagedLoadTests {
         #expect(titles.count == 8)
     }
 }
+
+/// Review R0/R1/R5/R11/R12/R17: writes made while another write about the
+/// same event is on the wire, and chains of queued writes.
+@MainActor
+@Suite("Engine: write chains", .serialized)
+struct WriteChainTests {
+    /// Start the background push of a write and wait until it's on the wire.
+    func waitUntilSending(_ engine: CalendarEngine) async {
+        for _ in 0..<2000 where !engine.isSyncing { await Task.yield() }
+    }
+
+    @Test func anEditWhileTheCreateIsOnTheWireIsKept() async {
+        let (engine, server, own) = makeEngine()
+        await engine.refresh()
+        server.set { $0.delay = .milliseconds(150) }
+        let e = engine.addEvent(to: own, allDay("Dentist", 2026, 11, 10))
+        await waitUntilSending(engine)
+        var f = e.fields
+        f.title = "Dentist 3pm"
+        engine.updateEvent(engine.event(e.id)!, f) // while the create is in flight
+        #expect(engine.event(e.id)?.fields.title == "Dentist 3pm")
+        server.set { $0.delay = .zero }
+        await engine.refresh()
+        await engine.refresh()
+        #expect(server.get { $0.events[e.id]?.fields.title } == "Dentist 3pm")
+        #expect(engine.event(e.id)?.fields.title == "Dentist 3pm")
+        #expect(engine.notices.isEmpty && engine.pendingCount == 0)
+    }
+
+    @Test func aDeleteWhileTheCreateIsOnTheWireReallyDeletes() async {
+        let (engine, server, own) = makeEngine()
+        await engine.refresh()
+        server.set { $0.delay = .milliseconds(150) }
+        let e = engine.addEvent(to: own, allDay("oops", 2026, 11, 11))
+        await waitUntilSending(engine)
+        engine.deleteEvent(engine.event(e.id)!)
+        server.set { $0.delay = .zero }
+        await engine.refresh()
+        await engine.refresh()
+        #expect(server.get { $0.events[e.id]?.deleted } == true, "the create landed and was never deleted")
+        #expect(engine.event(e.id) == nil)
+        #expect(engine.notices.isEmpty && engine.pendingCount == 0)
+    }
+
+    @Test func createThenThisAndFollowingOffline() async {
+        let (engine, server, own) = makeEngine()
+        await engine.refresh()
+        server.set { $0.offline = true }
+        let s = engine.addEvent(to: own, allDay("Gym", 2026, 11, 2, repeating: CalRecurrence(.weekly)))
+        let third = engine.occurrences(from: nov.0, through: nov.1).filter { $0.seriesID == s.id }[2]
+        var f = third.event.fields
+        f.title = "Gym (new place)"
+        f.when = .allDay(start: CalDate(2026, 11, 16), end: CalDate(2026, 11, 17))
+        engine.updateFollowing(third, f)
+        server.set { $0.offline = false }
+        await engine.refresh()
+        #expect(engine.notices.isEmpty, "\(engine.notices.map(\.message))")
+        #expect(server.get { $0.writes } == ["create Gym", "split"])
+        #expect(engine.occurrences(from: nov.0, through: nov.1).map(\.title).suffix(3) == ["Gym (new place)", "Gym (new place)", "Gym (new place)"])
+    }
+
+    @Test func editsToBothHalvesAfterAQueuedSplit() async {
+        let (engine, server, own) = makeEngine()
+        await engine.refresh()
+        let s = engine.addEvent(to: own, allDay("Class", 2026, 11, 2, repeating: CalRecurrence(.weekly)))
+        await engine.refresh()
+        server.set { $0.offline = true }
+        let third = engine.occurrences(from: nov.0, through: nov.1).filter { $0.seriesID == s.id }[2]
+        var nf = third.event.fields
+        nf.when = .allDay(start: CalDate(2026, 11, 16), end: CalDate(2026, 11, 17))
+        engine.updateFollowing(third, nf)
+        let newID = engine.occurrences(from: nov.0, through: nov.1).last!.seriesID!
+        var old = engine.event(s.id)!.fields
+        old.notes = "first half"
+        engine.updateEvent(engine.event(s.id)!, old)
+        var new = engine.event(newID)!.fields
+        new.notes = "second half"
+        engine.updateEvent(engine.event(newID)!, new)
+        server.set { $0.offline = false }
+        await engine.refresh()
+        #expect(engine.notices.isEmpty, "\(engine.notices.map(\.message))")
+        #expect(server.get { $0.events[s.id]?.fields.notes } == "first half")
+        #expect(server.get { $0.events[newID]?.fields.notes } == "second half")
+    }
+
+    @Test func deletingTheSeriesAfterAQueuedSplitLeavesNoPhantom() async {
+        let (engine, server, own) = makeEngine()
+        await engine.refresh()
+        let s = engine.addEvent(to: own, allDay("Class", 2026, 11, 2, repeating: CalRecurrence(.weekly)))
+        await engine.refresh()
+        server.set { $0.offline = true }
+        let third = engine.occurrences(from: nov.0, through: nov.1).filter { $0.seriesID == s.id }[2]
+        var nf = third.event.fields
+        nf.when = .allDay(start: CalDate(2026, 11, 16), end: CalDate(2026, 11, 17))
+        engine.updateFollowing(third, nf)
+        let newID = engine.occurrences(from: nov.0, through: nov.1).last!.seriesID!
+        engine.deleteEvent(engine.event(s.id)!)
+        server.set { $0.offline = false }
+        await engine.refresh()
+        #expect(engine.notices.isEmpty, "\(engine.notices.map(\.message))")
+        // The new series exists on the server exactly as it does here.
+        #expect(server.get { $0.events[newID] } != nil && engine.event(newID) != nil)
+        #expect(server.get { $0.events[s.id]?.deleted } == true)
+    }
+
+    @Test func writesBuiltOnARefusedOneAreNotSentAnyway() async {
+        let (engine, server, _) = makeEngine()
+        let theirs = server.addCalendar(owner: UUID(), role: .view)
+        await engine.refresh()
+        server.set { $0.offline = true }
+        let e = engine.addEvent(to: theirs, allDay("nope", 2026, 11, 5))
+        var f = e.fields
+        f.title = "still nope"
+        engine.updateEvent(engine.event(e.id)!, f) // merged into the create while offline
+        engine.setAlerts(for: engine.event(e.id)!, minutesBefore: [60])
+        server.set { $0.offline = false }
+        await engine.refresh()
+        #expect(engine.notices.count == 1, "\(engine.notices.map(\.message))")
+        #expect(engine.pendingCount <= 1) // the alert may still go (it's the person's own)
+        // The create was tried once and refused; nothing built on it went out.
+        let writes = server.get { $0.writes }
+        #expect(writes.filter { $0.hasPrefix("create") }.count == 1)
+        #expect(!writes.contains { $0.hasPrefix("update") })
+    }
+}
