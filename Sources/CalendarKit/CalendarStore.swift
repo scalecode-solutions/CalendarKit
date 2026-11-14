@@ -290,6 +290,43 @@ final class CalendarStore {
 
     func isPending(_ id: UUID) -> Bool { eventRecord(id)?.pending ?? false }
 
+    /// Apply a sync page's events in one fetch (not two per event, R48):
+    /// tombstones remove, the rest upsert; events with local changes still
+    /// waiting, or in `skip`, are left alone.
+    func applyServerEvents(_ events: [CalEvent], skip: Set<UUID>) {
+        guard !events.isEmpty else { return }
+        let ids = events.map(\.id)
+        let rows = (try? context.fetch(FetchDescriptor<EventRecord>(predicate: #Predicate { ids.contains($0.id) }))) ?? []
+        var byID = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for e in events where !skip.contains(e.id) {
+            let r = byID[e.id]
+            if r?.pending == true { continue }
+            if e.deleted {
+                if let r { context.delete(r); byID[e.id] = nil }
+            } else if let r {
+                r.payload = encode(e)
+                r.calendarID = e.calendarID
+                r.masterID = e.masterID
+                (r.firstDay, r.lastDay) = EventRecord.span(e)
+            } else {
+                let n = EventRecord(e, payload: encode(e), pending: false)
+                context.insert(n)
+                byID[e.id] = n
+            }
+        }
+    }
+
+    /// Make the pending flags match the queue: only rows flagged now or about
+    /// to be are touched, no payload decoded (R24).
+    func syncPendingFlags(waiting: Set<UUID>) {
+        let flagged = (try? context.fetch(FetchDescriptor<EventRecord>(predicate: #Predicate { $0.pending }))) ?? []
+        for r in flagged where !waiting.contains(r.id) { r.pending = false }
+        guard !waiting.isEmpty else { return }
+        let ids = Array(waiting)
+        let rows = (try? context.fetch(FetchDescriptor<EventRecord>(predicate: #Predicate { ids.contains($0.id) }))) ?? []
+        for r in rows where !r.pending { r.pending = true }
+    }
+
     func setPending(_ id: UUID, _ pending: Bool) { eventRecord(id)?.pending = pending }
 
     func removeEvent(_ id: UUID) {

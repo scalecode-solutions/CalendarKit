@@ -328,13 +328,7 @@ public final class CalendarEngine {
             if d.reload || (held[d.calendarID]?.rev ?? 0) == 0 {
                 store.clearForReload(d.calendarID)
             }
-            for e in d.events where !store.isPending(e.id) && !deleting.contains(e.id) {
-                if e.deleted {
-                    store.removeEvent(e.id)
-                } else {
-                    store.put(e, pending: false)
-                }
-            }
+            store.applyServerEvents(d.events, skip: deleting)
             for l in d.labels { store.putLabel(l) }
             for id in d.deletedLabelIDs { store.removeLabel(id) }
             // loadFrom stays set until a page says has_more is false. If that
@@ -549,10 +543,7 @@ public final class CalendarEngine {
     }
 
     private func refreshPendingFlags(_ store: CalendarStore) {
-        let waiting = Set(store.pending().compactMap { $0.1.eventID })
-        for e in store.allEvents() where store.isPending(e.id) != waiting.contains(e.id) {
-            store.setPending(e.id, waiting.contains(e.id))
-        }
+        store.syncPendingFlags(waiting: Set(store.pending().compactMap { $0.1.eventID }))
     }
 
     /// Queue a write, merging it into one already waiting for the same event.
