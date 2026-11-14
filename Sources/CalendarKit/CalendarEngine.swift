@@ -885,7 +885,7 @@ public final class CalendarEngine {
         case .notAuthenticated: return "Couldn't verify — try again"
         case .unavailable: return "Can't reach the calendar right now"
         case .serverFailed: return "The calendar server is having trouble"
-        case .slowDown: return "Too many changes at once — trying again shortly"
+        case .slowDown: return "Too many requests — trying again shortly"
         default: return "Couldn't sync"
         }
     }
