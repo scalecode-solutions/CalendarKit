@@ -98,8 +98,10 @@ public enum CalRepeatSummary {
         case .weekly:
             let base = n.interval == 1 ? "Every week" : "Every \(n.interval) weeks"
             let days = n.weekdays.compactMap { dayNames[$0] }
+            // Three or more days read better short: "on Mon, Wed and Fri".
+            let shown = days.count > 2 ? days.map { String($0.prefix(3)) } : days
             unit = days == ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"] && n.interval == 1
-                ? "Every weekday" : "\(base) on \(list(days))"
+                ? "Every weekday" : "\(base) on \(list(shown))"
         case .monthly:
             let base = n.interval == 1 ? "Every month" : "Every \(n.interval) months"
             let wd = dayNames[first.isoWeekday]!
@@ -200,6 +202,27 @@ public struct CalEventDraft: Equatable, Sendable {
         if let r = fields.recurrence {
             customRule = r
             ending = r.count.map { .after($0) } ?? r.until.map { .on($0) } ?? .never
+        }
+    }
+
+    /// The repeat as the editor shows it (a segmented control): nil = it
+    /// doesn't repeat. Setting a frequency edits the rule in place: the
+    /// interval, weekdays and month mode stay while the frequency does, and
+    /// reset when it changes (they mean something else per frequency). A
+    /// preset becomes its rule, so the controls below can edit it.
+    public var frequency: CalFrequency? {
+        get {
+            switch repeatPreset {
+            case .never: nil
+            case .custom: customRule.frequency
+            default: repeatPreset.rule()?.frequency
+            }
+        }
+        set {
+            guard let f = newValue else { repeatPreset = .never; return }
+            if repeatPreset != .custom, let r = repeatPreset.rule() { customRule = r }
+            if customRule.frequency != f { customRule = CalRecurrence(f) }
+            repeatPreset = .custom
         }
     }
 

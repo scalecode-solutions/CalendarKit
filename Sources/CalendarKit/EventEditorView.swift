@@ -95,17 +95,20 @@ struct EventEditorView: View {
                 }
                 ColorRow(selection: $draft.color)
             } footer: {
-                if let calendar, !calendar.isOwn {
-                    Text("Everyone who can see \(engine.displayName(calendar)) will see this event.")
-                } else if let own = calendar, own.isOwn {
-                    Text("Anyone you've shared your calendar with will see this event.")
+                // Who will see it matters when choosing where it goes; once
+                // it's there, saying so on every edit is noise (Frond's audit).
+                if isNew, let calendar {
+                    Text(calendar.isOwn ? "Anyone you've shared your calendar with will see this event."
+                                        : "Everyone who can see \(engine.displayName(calendar)) will see this event.")
                 }
             }
             if isNew {
-                Section("Your reminders") {
-                    AlertsPicker(allDay: draft.allDay, selection: Binding(
+                Section {
+                    RemindersRow(allDay: draft.allDay, selection: Binding(
                         get: { draft.alerts ?? (draft.allDay ? engine.alertDefaults.allDay : engine.alertDefaults.timed) },
                         set: { draft.alerts = $0 }))
+                } footer: {
+                    Text("Only you get these.")
                 }
             }
             Section("Notes") {
@@ -119,6 +122,7 @@ struct EventEditorView: View {
         // the one all-day days are derived in (R35). New events use the
         // device's zone, so nothing changes for them.
         .environment(\.timeZone, draft.timeZone)
+        .scrollDismissesKeyboard(.interactively)
         .calendarBackdrop(engine)
         .navigationTitle(isNew ? "New Event" : "Edit Event")
         .navigationBarTitleDisplayMode(.inline)
@@ -153,17 +157,20 @@ struct RepeatSection: View {
 
     var body: some View {
         Section {
-            Picker("Repeat", selection: $draft.repeatPreset) {
-                ForEach(CalRepeatPreset.allCases) { Text($0.title).tag($0) }
+            // One tap from "Never" to "Weekly" (Structured's picker): the
+            // frequency is a segmented control, and only what it needs shows.
+            Picker("Repeat", selection: $draft.frequency) {
+                Text("Never").tag(CalFrequency?.none)
+                Text("Daily").tag(Optional(CalFrequency.daily))
+                Text("Weekly").tag(Optional(CalFrequency.weekly))
+                Text("Monthly").tag(Optional(CalFrequency.monthly))
+                Text("Yearly").tag(Optional(CalFrequency.yearly))
             }
-            if draft.repeatPreset == .custom {
-                Picker("Frequency", selection: $draft.customRule.frequency) {
-                    Text("Daily").tag(CalFrequency.daily)
-                    Text("Weekly").tag(CalFrequency.weekly)
-                    Text("Monthly").tag(CalFrequency.monthly)
-                    Text("Yearly").tag(CalFrequency.yearly)
-                }
-                Stepper("Every \(draft.customRule.interval) \(unit)", value: $draft.customRule.interval, in: 1...99)
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("Repeat")
+            if draft.frequency != nil {
+                Stepper("Every \(draft.customRule.interval == 1 ? "" : "\(draft.customRule.interval) ")\(unit)",
+                        value: $draft.customRule.interval, in: 1...99)
                 if draft.customRule.frequency == .weekly { weekdays }
                 if draft.customRule.frequency == .monthly {
                     Picker("On", selection: $draft.customRule.monthly) {
@@ -174,27 +181,28 @@ struct RepeatSection: View {
                         }
                     }
                 }
-            }
-            if draft.repeatPreset != .never {
-                Picker("End Repeat", selection: endingKind) {
+                Picker("Ends", selection: endingKind) {
                     Text("Never").tag(0)
-                    Text("On Date").tag(1)
+                    Text("On a date").tag(1)
                     Text("After").tag(2)
                 }
+                .pickerStyle(.segmented)
                 switch draft.ending {
                 case .on(let d):
-                    DatePicker("End Date", selection: Binding(
+                    DatePicker("End date", selection: Binding(
                         get: { CalRecurrenceExpander.wallClock(d, hour: 12, minute: 0, second: 0, in: draft.timeZone) },
                         set: { draft.ending = .on(CalDate($0, in: draft.timeZone)) }), in: draft.start..., displayedComponents: .date)
                 case .after(let n):
-                    Stepper("\(n) times", value: Binding(get: { n }, set: { draft.ending = .after($0) }), in: 1...1000)
+                    Stepper(n == 1 ? "Once" : "\(n) times", value: Binding(get: { n }, set: { draft.ending = .after($0) }), in: 1...1000)
                 case .never:
                     EmptyView()
                 }
             }
+        } header: {
+            Text("Repeat")
         } footer: {
-            if draft.repeatPreset != .never, case .success(let f) = draft.fields(), let r = f.recurrence {
-                Text(CalRepeatSummary.text(r, first: f.when.firstDay))
+            if draft.frequency != nil, case .success(let f) = draft.fields(), let r = f.recurrence {
+                Label(CalRepeatSummary.text(r, first: f.when.firstDay), systemImage: "repeat")
             }
         }
     }
@@ -253,28 +261,31 @@ struct RepeatSection: View {
     }
 }
 
-/// The palette as a row of swatches.
+/// The palette: a labelled grid of swatches, all in view (a scrolling row
+/// cut a swatch in half at the edge and didn't read as a choice).
 struct ColorRow: View {
     @Binding var selection: CalColor
+    @ScaledMetric(relativeTo: .body) private var swatch: CGFloat = 28
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 10) {
+            LabeledContent("Color", value: selection == .none ? "Calendar's" : selection.title)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 8), spacing: 10) {
                 ForEach(CalColor.allCases, id: \.self) { c in
                     Button { selection = c } label: {
                         Circle()
                             .fill(c == .none ? AnyShapeStyle(.quaternary) : AnyShapeStyle(CalTint(c)))
-                            .frame(width: 26, height: 26)
+                            .frame(width: min(swatch, 40), height: min(swatch, 40))
                             .overlay { if selection == c { Image(systemName: "checkmark").font(.caption.weight(.bold)).foregroundStyle(c == .none ? AnyShapeStyle(.primary) : AnyShapeStyle(CalOnTint(c))) } }
-                            .overlay { if c == .none { Image(systemName: "slash.circle").foregroundStyle(.secondary) } }
+                            .overlay { if c == .none && selection != c { Image(systemName: "slash.circle").foregroundStyle(.secondary) } }
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(c.title)
+                    .accessibilityLabel(c == .none ? "Calendar's color" : c.title)
                     .accessibilityAddTraits(selection == c ? .isSelected : [])
                 }
             }
-            .padding(.vertical, 4)
         }
+        .padding(.vertical, 4)
     }
 }
 
