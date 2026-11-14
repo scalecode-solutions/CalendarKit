@@ -231,6 +231,11 @@ final class FakeServer: CalendarTransport, Sendable {
             let n = CalEvent(id: newID, calendarID: m.calendarID, fields: fields, masterID: nil, originalStart: nil, cancelled: false,
                              createdBy: s.me, updatedBy: s.me, createdAt: Date(), updatedAt: Date(), rev: rev, deleted: false)
             s.events[newID] = n
+            // As the server: the reminders follow when all-day/timed matches.
+            if fields.when.isAllDay == m.fields.when.isAllDay, let a = s.alerts[masterID] {
+                s.alertsRev += 1
+                s.alerts[newID] = CalAlert(eventID: newID, minutesBefore: a.minutesBefore, rev: s.alertsRev)
+            }
             return try answer(&s, (m, n))
         }
     }

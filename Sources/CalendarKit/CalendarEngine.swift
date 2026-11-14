@@ -659,10 +659,13 @@ public final class CalendarEngine {
         store.put(old, pending: true)
         store.put(newSeries, pending: true)
         commit(.split(masterID: series.id, baseRev: series.rev, at: original, newSeries: newSeries, discardNew: false))
-        // The person's reminders for the series go on with it (R19): queued
-        // after the split, so the new series exists when they land.
-        if let minutes = store.alerts()[series.id], !minutes.isEmpty {
-            setAlerts(for: newSeries, minutesBefore: minutes)
+        // Everyone's reminders follow the split on the server (it copies them
+        // in the same transaction, when all-day/timed matches). Show ours at
+        // once; the next sync brings the server's copy.
+        if let minutes = store.alerts()[series.id], f.when.isAllDay == series.fields.when.isAllDay {
+            store.putAlert(CalAlert(eventID: newSeries.id, minutesBefore: minutes, rev: 0))
+            store.save()
+            publish()
         }
     }
 
