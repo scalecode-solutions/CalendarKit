@@ -96,6 +96,9 @@ final class FakeServer: CalendarTransport, Sendable {
         }
     }
 
+    /// Delete a label on the server (as another device of the owner would).
+    func externalDeleteLabel(_ id: UUID) async throws { try await deleteLabel(id: id) }
+
     func externalCreate(_ cal: UUID, _ fields: CalEventFields) -> CalEvent {
         state.withLock { s in
             let e = CalEvent(id: UUID(), calendarID: cal, fields: fields, masterID: nil, originalStart: nil, cancelled: false,
@@ -291,6 +294,11 @@ final class FakeServer: CalendarTransport, Sendable {
             guard var l = s.labels[id]?.0 else { throw CalTransportError.notFound }
             l.rev = bump(&s, l.calendarID)
             s.labels[id] = (l, true)
+            // As the server: events with the label lose it, in the same rev.
+            for (k, e) in s.events where e.fields.labelID == id && !e.deleted {
+                s.events[k]!.fields.labelID = nil
+                s.events[k]!.rev = l.rev
+            }
         }
     }
 
@@ -864,5 +872,26 @@ struct SplitReminderTests {
         #expect(engine.alerts[newID] == [900])
         #expect(server.get { $0.alerts[newID]?.minutesBefore } == [900])
         #expect(engine.notices.isEmpty)
+    }
+}
+
+/// R28: a label deleted elsewhere reaches this device on its events too.
+@MainActor
+@Suite("Engine: label deleted elsewhere", .serialized)
+struct LabelDeletedElsewhereTests {
+    @Test func eventsLoseTheLabelOnTheNextSync() async throws {
+        let (engine, server, own) = makeEngine()
+        await engine.refresh()
+        let label = engine.saveLabel(name: "Work", color: .orange)!
+        var f = allDay("Shift", 2026, 11, 5)
+        f.labelID = label.id
+        let e = engine.addEvent(to: own, f)
+        await engine.refresh()
+        #expect(engine.occurrences(from: nov.0, through: nov.1).first?.color == .orange)
+        try await server.externalDeleteLabel(label.id) // the owner's other phone
+        await engine.refresh()
+        #expect(engine.event(e.id)?.fields.labelID == nil)
+        #expect(engine.labels.isEmpty)
+        #expect(engine.occurrences(from: nov.0, through: nov.1).first?.color != .orange)
     }
 }
