@@ -46,7 +46,7 @@ public extension CalColor {
         switch self {
         case .red:    ((215, 50, 50), (255, 105, 100))
         case .orange: ((225, 110, 0), (255, 160, 70))
-        case .yellow: ((195, 150, 0), (250, 210, 60))
+        case .yellow: ((145, 105, 0), (250, 210, 60)) // light: deep amber, so yellow as text clears 4.5:1 on the card
         case .green:  ((40, 150, 60), (95, 210, 110))
         case .mint:   ((0, 160, 120), (90, 220, 180))
         case .teal:   ((0, 140, 140), (50, 200, 190))
