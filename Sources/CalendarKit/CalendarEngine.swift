@@ -145,16 +145,19 @@ public final class CalendarEngine {
     /// Sign-out: stop, then delete the cache (and queued writes) for this user.
     public func wipeLocalStore() {
         stop()
-        isWiped = true
         wipes += 1
         // Clear reminders after any replan already running, so it can't add
         // them back behind the clear (R15, R40).
         let r = reminders, running = replanTask
         replanTask = nil
         Task { await running?.value; await r.clear() }
+        // Open (if this launch never did) and wipe BEFORE marking the engine
+        // signed out: openStore() refuses once isWiped is set, and a sign-out
+        // that never opened the store left the last person's cache on disk.
         if store == nil { openStore() }
         store?.wipeAll()
         store = nil
+        isWiped = true
         calendars = []
         labels = []
         alerts = [:]

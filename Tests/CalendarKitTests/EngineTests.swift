@@ -1050,3 +1050,35 @@ final class SlowCenter: ReminderCenter, Sendable {
     func remove(_ ids: [String]) async { await inner.remove(ids) }
     var all: [CalReminder] { inner.all }
 }
+
+/// Frond's catch: signing out on a launch that never opened the store must
+/// still wipe what's on disk.
+@MainActor
+@Suite("Engine: sign-out on a cold launch", .serialized)
+struct ColdWipeTests {
+    @Test func aSignOutBeforeAnyRefreshWipesTheDiskStore() async {
+        let me = UUID()
+        let server = FakeServer(me: me)
+        let own = server.addCalendar(owner: me, role: .owner)
+        func engine() -> CalendarEngine {
+            let e = CalendarEngine(config: CalendarConfig(baseURL: URL(string: "http://fake")!, currentUserID: me, tokenProvider: { "t" }),
+                                   transport: server, reminderCenter: FakeCenter())
+            e.storeInMemory = false // the real on-disk store, one file per (random) user
+            return e
+        }
+        let first = engine()
+        _ = server.externalCreate(own, allDay("left behind?", 2026, 11, 2))
+        await first.refresh()
+        #expect(first.occurrences(from: nov.0, through: nov.1).count == 1)
+        first.stop()
+        let cold = engine()        // a later launch: never started, store never opened
+        cold.wipeLocalStore()      // sign-out
+        server.set { $0.offline = true }
+        let after = engine()       // the next launch
+        after.start()
+        after.stop()
+        #expect(after.calendars.isEmpty, "the signed-out person's cache survived on disk")
+        #expect(after.occurrences(from: nov.0, through: nov.1, includeHidden: true).isEmpty)
+        after.wipeLocalStore()
+    }
+}
