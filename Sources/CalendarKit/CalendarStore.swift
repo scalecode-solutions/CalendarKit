@@ -304,13 +304,15 @@ final class CalendarStore {
     /// waiting, or in `skip`, are left alone.
     func applyServerEvents(_ events: [CalEvent], skip: Set<UUID>) {
         guard !events.isEmpty else { return }
-        eventChanges += 1
         let ids = events.map(\.id)
         let rows = (try? context.fetch(FetchDescriptor<EventRecord>(predicate: #Predicate { ids.contains($0.id) }))) ?? []
         var byID = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var changed = false
+        defer { if changed { eventChanges += 1 } }
         for e in events where !skip.contains(e.id) {
             let r = byID[e.id]
             if r?.pending == true { continue }
+            changed = true
             if e.deleted {
                 if let r { context.delete(r); byID[e.id] = nil }
             } else if let r {

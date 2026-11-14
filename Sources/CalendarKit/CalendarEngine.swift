@@ -183,7 +183,6 @@ public final class CalendarEngine {
         publish()
     }
 
-    /// Copy the store's state into the observable properties.
     /// Publish the cache to the views. Only what changed is assigned, and
     /// `revision` moves only when something did, so a sync that brought
     /// nothing new doesn't make every view rebuild (R22).
