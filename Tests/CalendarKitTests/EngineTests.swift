@@ -190,6 +190,7 @@ final class FakeServer: CalendarTransport, Sendable {
             try gate(&s, cancelled ? "cancel" : "exception")
             try writable(s, calendarID)
             guard let m = s.events[masterID], !m.deleted else { throw CalTransportError.invalid("no such series") }
+            guard Self.isOccurrence(m, originalStart) else { throw CalTransportError.invalid("that isn't an occurrence of this series") }
             let rev = bump(&s, calendarID)
             if let old = s.events.values.first(where: { $0.masterID == masterID && $0.originalStart == originalStart && !$0.deleted }) {
                 guard cancelled else { throw CalTransportError.exists("already changed") }
@@ -202,6 +203,20 @@ final class FakeServer: CalendarTransport, Sendable {
             s.events[id] = e
             return e
         }
+    }
+
+    /// As the server (MVCALE-6): an exception or split must name a start the
+    /// series produces.
+    static func isOccurrence(_ m: CalEvent, _ o: CalOriginalStart) -> Bool {
+        guard let rule = m.fields.recurrence, m.masterID == nil else { return false }
+        let day: CalDate
+        switch o {
+        case .date(let d): day = d
+        case .instant(let t):
+            guard case .timed(_, _, let tz) = m.fields.when else { return false }
+            day = CalDate(t, in: TimeZone(identifier: tz) ?? .gmt)
+        }
+        return OccurrenceBuilder.expand(m, rule: rule, through: day.adding(days: 1)).contains { $0.0 == o }
     }
 
     func updateEvent(id: UUID, baseRev: Int64, fields: CalEventFields) async throws -> CalEvent {
@@ -242,6 +257,7 @@ final class FakeServer: CalendarTransport, Sendable {
             // Idempotent by the new id, as the real server.
             if let prev = s.events[newID], prev.calendarID == m.calendarID, prev.masterID == nil { return (m, prev) }
             guard m.rev == baseRev else { throw CalTransportError.conflict(current: m) }
+            guard Self.isOccurrence(m, originalStart) else { throw CalTransportError.invalid("that isn't an occurrence of this series") }
             let rev = bump(&s, m.calendarID)
             guard case .date(let d) = originalStart else { throw CalTransportError.invalid("fake: dates only") }
             m.fields.recurrence?.count = nil
@@ -494,6 +510,29 @@ struct EngineTests {
         #expect(engine.occurrences(from: nov.0, through: nov.1, includeHidden: true).contains { $0.title == "Their thing" })
         await engine.refresh()
         #expect(server.get { $0.calendars.first { $0.id == other }?.visible } == false)
+    }
+
+    /// MVCALE-6: an occurrence changed offline while the other person moved the
+    /// whole series names a start the series no longer has. The server refuses
+    /// it: one notice, no ghost exception, the series as the server holds it.
+    @Test func aChangeToAnOccurrenceTheSeriesNoLongerHasIsRefusedWithANotice() async {
+        let (engine, server, own) = makeEngine()
+        await engine.refresh()
+        let s = engine.addEvent(to: own, allDay("Shift", 2026, 11, 2, repeating: CalRecurrence(.weekly)))
+        await engine.refresh()
+        let second = engine.occurrences(from: nov.0, through: nov.1).filter { $0.seriesID == s.id }[1]
+        engine.deleteOccurrence(second) // queued: Monday Nov 9
+        server.externalUpdate(s.id) { f in // meanwhile: the series moves to Tuesdays
+            f.when = .allDay(start: CalDate(2026, 11, 3), end: CalDate(2026, 11, 4))
+            f.recurrence = CalRecurrence(.weekly, weekdays: [2])
+        }
+        await engine.refresh()
+        #expect(engine.notices.count == 1)
+        #expect(engine.notices.first?.message.contains("isn't an occurrence") == true)
+        #expect(!server.get { $0.events.values.contains { $0.masterID == s.id && !$0.deleted } })
+        #expect(engine.occurrences(from: nov.0, through: nov.1).filter { $0.seriesID == s.id }.map(\.when.firstDay)
+                == [CalDate(2026, 11, 3), CalDate(2026, 11, 10), CalDate(2026, 11, 17), CalDate(2026, 11, 24)])
+        #expect(engine.pendingCount == 0)
     }
 
     @Test func thisAndFollowing() async {
