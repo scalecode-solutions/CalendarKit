@@ -387,16 +387,33 @@ public final class CalendarEngine {
                                                             originalStart: e.originalStart!, fields: e.fields, cancelled: e.cancelled)
             landed(saved, after: pid, store: store)
         case .update(let id, let base, let fields):
-            landed(try await transport.updateEvent(id: id, baseRev: base, fields: fields), after: pid, store: store)
+            do {
+                landed(try await transport.updateEvent(id: id, baseRev: base, fields: fields), after: pid, store: store)
+            } catch CalTransportError.conflict(let current?) where current.fields == fields && current.updatedBy == config.currentUserID {
+                // A retry of an update whose answer was lost: the server
+                // already has exactly this change, from us. Done, not a race.
+                landed(current, after: pid, store: store)
+            }
         case .delete(let id, let base):
-            _ = try await transport.deleteEvent(id: id, baseRev: base)
+            do {
+                _ = try await transport.deleteEvent(id: id, baseRev: base)
+            } catch CalTransportError.notFound {
+                // Already gone (a retry whose answer was lost, or someone else
+                // deleted it): what we wanted either way.
+            }
             store.removeEvent(id)
             store.removeExceptions(of: id)
         case .split(let master, let base, let at, let s, let discardNew):
             let r = try await transport.splitSeries(masterID: master, baseRev: base, at: at, newID: s.id, fields: s.fields)
             landed(r.old, after: pid, store: store)
             if discardNew {
-                _ = try await transport.deleteEvent(id: r.new.id, baseRev: r.new.rev)
+                // "Delete this and following": the tail goes at once. On a
+                // retry the server returns the same split (idempotent by the new
+                // id), and a tail already deleted is fine.
+                if !r.new.deleted {
+                    do { _ = try await transport.deleteEvent(id: r.new.id, baseRev: r.new.rev) }
+                    catch CalTransportError.notFound {}
+                }
             } else {
                 landed(r.new, after: pid, store: store)
             }

@@ -25,6 +25,14 @@ final class FakeServer: CalendarTransport, Sendable {
         var pageLimit = 500
         /// Per calendar: the newest purged tombstone's rev (the server's purged_rev).
         var purgedRev: [UUID: Int64] = [:]
+        /// Apply the next write, then lose its answer (a dropped connection).
+        var loseNextAnswer = false
+    }
+
+    /// The answer to a write that was applied: lost if loseNextAnswer is set.
+    private func answer<T>(_ s: inout State, _ v: T) throws -> T {
+        if s.loseNextAnswer { s.loseNextAnswer = false; throw CalTransportError.unavailable("answer lost") }
+        return v
     }
     let state: Mutex<State>
 
@@ -184,9 +192,10 @@ final class FakeServer: CalendarTransport, Sendable {
             guard e.rev == baseRev else { throw CalTransportError.conflict(current: e) }
             e.fields = fields
             e.cancelled = false
+            e.updatedBy = s.me
             e.rev = bump(&s, e.calendarID)
             s.events[id] = e
-            return e
+            return try answer(&s, e)
         }
     }
 
@@ -201,7 +210,7 @@ final class FakeServer: CalendarTransport, Sendable {
                 s.events[k]!.deleted = true
                 s.events[k]!.rev = rev
             }
-            return rev
+            return try answer(&s, rev)
         }
     }
 
@@ -210,6 +219,8 @@ final class FakeServer: CalendarTransport, Sendable {
         try state.withLock { s in
             try gate(&s, "split")
             guard var m = s.events[masterID] else { throw CalTransportError.notFound }
+            // Idempotent by the new id, as the real server.
+            if let prev = s.events[newID], prev.calendarID == m.calendarID, prev.masterID == nil { return (m, prev) }
             guard m.rev == baseRev else { throw CalTransportError.conflict(current: m) }
             let rev = bump(&s, m.calendarID)
             guard case .date(let d) = originalStart else { throw CalTransportError.invalid("fake: dates only") }
@@ -220,7 +231,7 @@ final class FakeServer: CalendarTransport, Sendable {
             let n = CalEvent(id: newID, calendarID: m.calendarID, fields: fields, masterID: nil, originalStart: nil, cancelled: false,
                              createdBy: s.me, updatedBy: s.me, createdAt: Date(), updatedAt: Date(), rev: rev, deleted: false)
             s.events[newID] = n
-            return (m, n)
+            return try answer(&s, (m, n))
         }
     }
 
@@ -714,5 +725,54 @@ struct WriteChainTests {
         let writes = server.get { $0.writes }
         #expect(writes.filter { $0.hasPrefix("create") }.count == 1)
         #expect(!writes.contains { $0.hasPrefix("update") })
+    }
+}
+
+/// Review R7/R9/R18: a write applied on the server whose answer never came back.
+@MainActor
+@Suite("Engine: lost answers", .serialized)
+struct LostAnswerTests {
+    @Test func aLostUpdateAnswerIsNotACollision() async {
+        let (engine, server, own) = makeEngine()
+        let e = server.externalCreate(own, allDay("Dentist", 2026, 11, 10))
+        await engine.refresh()
+        var f = e.fields
+        f.title = "Dentist 3pm"
+        server.set { $0.loseNextAnswer = true }
+        engine.updateEvent(engine.event(e.id)!, f)
+        await engine.refresh() // applied, answer lost: stays queued
+        await engine.refresh() // retried: the server already has it
+        #expect(engine.notices.isEmpty, "\(engine.notices.map(\.message))")
+        #expect(engine.pendingCount == 0)
+        #expect(engine.event(e.id)?.fields.title == "Dentist 3pm")
+    }
+
+    @Test func aLostDeleteAnswerIsNotNoLongerThere() async {
+        let (engine, server, own) = makeEngine()
+        let e = server.externalCreate(own, allDay("Dentist", 2026, 11, 10))
+        await engine.refresh()
+        server.set { $0.loseNextAnswer = true }
+        engine.deleteEvent(engine.event(e.id)!)
+        await engine.refresh()
+        await engine.refresh()
+        #expect(engine.notices.isEmpty, "\(engine.notices.map(\.message))")
+        #expect(engine.pendingCount == 0 && engine.event(e.id) == nil)
+    }
+
+    @Test func aLostSplitAnswerStillDeletesTheFuture() async {
+        let (engine, server, own) = makeEngine()
+        await engine.refresh()
+        let s = engine.addEvent(to: own, allDay("Class", 2026, 11, 2, repeating: CalRecurrence(.weekly)))
+        await engine.refresh()
+        let third = engine.occurrences(from: nov.0, through: nov.1).filter { $0.seriesID == s.id }[2]
+        server.set { $0.loseNextAnswer = true }
+        engine.deleteFollowing(third)
+        await engine.refresh() // the split applied, its answer lost
+        await engine.refresh() // retried: same split back, tail deleted
+        #expect(engine.notices.isEmpty, "\(engine.notices.map(\.message))")
+        #expect(engine.pendingCount == 0)
+        #expect(engine.occurrences(from: nov.0, through: nov.1).map(\.title) == ["Class", "Class"])
+        let live = server.get { $0.events.values.filter { !$0.deleted && $0.masterID == nil }.count }
+        #expect(live == 1, "the tail series survived on the server")
     }
 }
