@@ -21,11 +21,37 @@ final class CalendarLabUITests: XCTestCase {
     /// Forms create rows lazily: swipe until the element exists and can be tapped.
     @discardableResult
     func reveal(_ e: XCUIElement, in container: XCUIElement? = nil) -> XCUIElement {
-        for _ in 0..<8 where !(e.exists && e.isHittable) {
-            (container ?? app).swipeUp()
+        // Swipe toward it: up while it's below (or not made yet), down once it
+        // has gone past the top. Up-only overshot on taller screens and could
+        // never come back.
+        let window = app.windows.firstMatch.frame
+        for _ in 0..<10 where !(e.exists && e.isHittable) {
+            if e.exists && e.frame.maxY < window.minY + window.height * 0.25 {
+                (container ?? app).swipeDown()
+            } else {
+                (container ?? app).swipeUp()
+            }
         }
         XCTAssert(e.exists && e.isHittable, "can't reach \(e)")
         return e
+    }
+
+    /// Return ends the edit and the keyboard goes; tapping the bar didn't, and
+    /// on a taller phone the keyboard then covered the rows a test wanted.
+    func dismissKeyboard() {
+        if app.keyboards.count > 0 { app.typeText("\n") }
+        XCTAssert(app.keyboards.firstMatch.waitForNonExistence(timeout: 3), "the keyboard stayed up")
+    }
+
+    /// Tap a segment until it's the selected one: a tap that lands while the
+    /// form is still settling (the keyboard just went) can be dropped.
+    func select(_ segment: XCUIElement) {
+        reveal(segment)
+        for _ in 0..<3 where !segment.isSelected {
+            segment.tap()
+            for _ in 0..<10 where !segment.isSelected { usleep(200_000) } // up to 2 s
+        }
+        XCTAssert(segment.isSelected, "\(segment) didn't take")
     }
 
     func shot(_ name: String) {
@@ -128,10 +154,9 @@ final class CalendarLabUITests: XCTestCase {
         XCTAssert(title.waitForExistence(timeout: 5))
         title.tap()
         title.typeText("UI test standup")
-        app.navigationBars["New Event"].tap() // put the keyboard away
+        dismissKeyboard()
         // Repeat is a segmented control: one tap from Never to Daily.
-        let daily = app.segmentedControls["Repeat"].buttons["Daily"]
-        reveal(daily).tap()
+        select(app.segmentedControls["Repeat"].buttons["Daily"])
         XCTAssert(app.staticTexts["Every day"].waitForExistence(timeout: 3)) // the summary under it
         shot("7-repeat")
         app.navigationBars["New Event"].buttons["Add"].tap()
@@ -158,8 +183,8 @@ final class CalendarLabUITests: XCTestCase {
         title.typeText("UI test physio")
         app.textFields["Location"].tap()
         app.textFields["Location"].typeText("Riverside Clinic")
-        app.navigationBars["New Event"].tap() // put the keyboard away
-        reveal(app.segmentedControls["Repeat"].buttons["Weekly"]).tap()
+        dismissKeyboard()
+        select(app.segmentedControls["Repeat"].buttons["Weekly"])
         shot("e1-editor-repeat")
         reveal(app.buttons["Reminders"])
         shot("e2-editor-color-reminders")
