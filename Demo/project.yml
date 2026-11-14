@@ -1,0 +1,63 @@
+# CalendarLab — the standalone harness for CalendarKit. Generate the project with:
+#   cd Demo && xcodegen generate
+# The generated CalendarLab.xcodeproj is committed (matching TraxLab).
+name: CalendarLab
+options:
+  bundleIdPrefix: dev.scalecode
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+packages:
+  CalendarKit:
+    path: ..
+  MvAuth-iOS:
+    url: https://github.com/scalecode-solutions/MvAuth-iOS.git
+    branch: main
+settings:
+  base:
+    DEVELOPMENT_TEAM: YBFJUNLFT6
+    SWIFT_VERSION: "6.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+targets:
+  CalendarLab:
+    type: application
+    platform: iOS
+    sources:
+      - CalendarLab
+    dependencies:
+      - package: CalendarKit
+      - package: MvAuth-iOS
+        product: MvAuth
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.scalecode.CalendarLab
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: CalendarLab
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+  CalendarLabUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - CalendarLabUITests
+    dependencies:
+      - target: CalendarLab
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.scalecode.CalendarLabUITests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: CalendarLab
+        CODE_SIGN_STYLE: Automatic
+schemes:
+  CalendarLab:
+    build:
+      targets:
+        CalendarLab: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - CalendarLabUITests
