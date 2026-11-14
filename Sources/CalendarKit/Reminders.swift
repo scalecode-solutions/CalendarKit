@@ -47,7 +47,7 @@ public enum ReminderPlanner {
 
     /// The person's reminders for an occurrence: their own for the event, else
     /// for its series; with neither, their defaults if someone else added it
-    /// (Travis's call, R20: a partner's events remind you like your own do).
+    /// (the product call, R20: a partner's events remind you like your own do).
     /// Anything set explicitly wins, including none.
     public static func effective(_ o: CalOccurrence, alerts: [UUID: [Int]], me: UUID?, defaults: CalAlertDefaults) -> [Int] {
         if let m = alerts[o.event.id] ?? o.seriesID.flatMap({ alerts[$0] }) { return m }

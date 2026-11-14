@@ -83,7 +83,7 @@ struct ReminderTests {
         #expect(ReminderPlanner.plan(occurrences: occ([daily]), alerts: [daily.id: [0]], now: at(2026, 11, 1, 0), zone: chicago, budget: 0).isEmpty)
     }
 
-    /// R20 (Travis: "use my defaults"): events someone else added remind with
+    /// R20 ("use my defaults"): events someone else added remind with
     /// the person's defaults; their own don't (they got defaults when made),
     /// and anything set explicitly — including none — wins.
     @Test func partnerEventsUseMyDefaults() {
