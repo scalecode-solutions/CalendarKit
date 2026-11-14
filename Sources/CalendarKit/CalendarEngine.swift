@@ -93,7 +93,7 @@ public final class CalendarEngine {
     /// Re-plan local reminders from the cache (after every sync; hosts also
     /// call it when the app comes to the foreground).
     public func replanReminders(now: Date = Date()) async {
-        guard config.remindersEnabled, store != nil else { return }
+        guard config.remindersEnabled, store != nil, !isWiped else { return }
         let zone = TimeZone.current
         let today = CalDate(now, in: zone)
         let plan = ReminderPlanner.plan(occurrences: occurrences(from: today.adding(days: -1),
@@ -101,6 +101,7 @@ public final class CalendarEngine {
                                         alerts: alerts, now: now, zone: zone, budget: config.reminderBudget,
                                         me: config.currentUserID, defaults: alertDefaults)
         log.debug("reminders: planning \(plan.count, privacy: .public)")
+        guard !isWiped else { return }
         let (added, removed) = await reminders.apply(plan)
         log.debug("reminders: +\(added, privacy: .public) -\(removed, privacy: .public)")
     }
@@ -114,6 +115,7 @@ public final class CalendarEngine {
 
     /// Open the cache and keep it fresh while started. Idempotent.
     public func start() {
+        isWiped = false
         guard refreshTask == nil else { return }
         openStore()
         refreshTask = Task { [weak self] in
@@ -132,11 +134,24 @@ public final class CalendarEngine {
         refreshTask = nil
     }
 
+    /// Set by wipeLocalStore(), cleared by start(): after a sign-out nothing
+    /// still in flight may refresh, write to the cache or plan reminders, or
+    /// the signed-out person's calendar comes back (R16).
+    private(set) var isWiped = false
+    /// Bumped by wipeLocalStore(): a write that lands afterwards mustn't touch
+    /// the (wiped) cache.
+    private var wipes = 0
+
     /// Sign-out: stop, then delete the cache (and queued writes) for this user.
     public func wipeLocalStore() {
         stop()
-        let r = reminders
-        Task { await r.clear() }
+        isWiped = true
+        wipes += 1
+        // Clear reminders after any replan already running, so it can't add
+        // them back behind the clear (R15, R40).
+        let r = reminders, running = replanTask
+        replanTask = nil
+        Task { await running?.value; await r.clear() }
         if store == nil { openStore() }
         store?.wipeAll()
         store = nil
@@ -153,7 +168,7 @@ public final class CalendarEngine {
     }
 
     private func openStore() {
-        guard store == nil else { return }
+        guard store == nil, !isWiped else { return }
         do {
             store = try CalendarStore(userID: config.currentUserID, appGroup: config.appGroup, inMemory: storeInMemory)
         } catch {
@@ -236,6 +251,7 @@ public final class CalendarEngine {
     /// runs waits for it, then runs its own (one at a time, never overlapping).
     public func refresh() async {
         while let running = inflight { await running.value }
+        guard !isWiped else { return } // signed out meanwhile: nothing to sync
         let task = Task { [weak self] in
             await self?.runRefresh()
             self?.inflight = nil // cleared by the task itself, so no waiter ever sees a finished one
@@ -272,6 +288,7 @@ public final class CalendarEngine {
             lastError = Self.describe(e)
             if calendars.isEmpty { loadState = .failed(lastError ?? "") }
         } catch {
+            guard gen == generation else { return }
             lastError = "Couldn't sync"
         }
     }
@@ -283,6 +300,12 @@ public final class CalendarEngine {
         }
         store.setCalendars(page.calendars)
         let held = store.cursors()
+        // Events deleted here and not yet sent: a page (perhaps built before
+        // the delete reached the server) mustn't bring them back (R41).
+        let deleting = Set(store.pending().compactMap { (_, w) -> UUID? in
+            if case .delete(let id, _) = w { return id }
+            return nil
+        })
         // A calendar this device holds nothing confirmed for (cursor 0) that the
         // server sends no delta for has nothing on the server: drop leftovers.
         let withDelta = Set(page.deltas.map(\.calendarID))
@@ -295,7 +318,7 @@ public final class CalendarEngine {
             if d.reload || (held[d.calendarID]?.rev ?? 0) == 0 {
                 store.clearForReload(d.calendarID)
             }
-            for e in d.events where !store.isPending(e.id) {
+            for e in d.events where !store.isPending(e.id) && !deleting.contains(e.id) {
                 if e.deleted {
                     store.removeEvent(e.id)
                 } else {
@@ -323,26 +346,34 @@ public final class CalendarEngine {
 
     private func flush(_ gen: Int) async {
         guard let store else { return }
+        let w0 = wipes
         // Re-read the queue before each write: a refused write drops the ones
         // built on it, and writes made meanwhile join the end.
         for _ in 0..<1000 {
             guard gen == generation, let (pid, w) = store.pending().first else { return }
             inFlight = pid
             do {
-                try await perform(w, pid: pid, store: store)
+                try await perform(w, pid: pid, store: store, alive: { [weak self] in self?.wipes == w0 })
                 inFlight = nil
-                guard gen == generation else { return }
+                guard wipes == w0 else { return }
+                // It happened on the server: off the queue even if stop() came
+                // meanwhile, or it would be sent again (R13, R14).
                 store.dropPending(pid)
+                guard gen == generation else { store.save(); publish(); return }
+            } catch is CancellationError {
+                inFlight = nil
+                return // signed out while it was on the wire
             } catch let e as CalTransportError where e.isRetryable && !gaveUp(e, pid: pid, store: store) {
                 inFlight = nil
+                guard wipes == w0 else { return }
                 store.bumpAttempts(pid)
                 if case .serverFailed = e { store.bumpServerFailures(pid) }
                 store.save()
-                lastError = Self.describe(e)
+                if gen == generation { lastError = Self.describe(e) }
                 break // keep the order: everything after waits too
             } catch {
                 inFlight = nil
-                guard gen == generation else { return }
+                guard gen == generation, wipes == w0 else { return }
                 store.dropPending(pid)
                 refused(w, error: error, store: store)
             }
@@ -404,21 +435,26 @@ public final class CalendarEngine {
     }
 
     /// Send one write and apply what the server answered.
-    private func perform(_ w: PendingWrite, pid: UUID, store: CalendarStore) async throws {
+    private func perform(_ w: PendingWrite, pid: UUID, store: CalendarStore, alive: @escaping () -> Bool = { true }) async throws {
+        // After each answer, before touching the cache: signed out meanwhile?
+        func live<T>(_ v: T) throws -> T {
+            guard alive() else { throw CancellationError() }
+            return v
+        }
         switch w {
         case .create(let e):
-            landed(try await transport.createEvent(id: e.id, calendarID: e.calendarID, fields: e.fields), after: pid, store: store)
+            landed(try live(try await transport.createEvent(id: e.id, calendarID: e.calendarID, fields: e.fields)), after: pid, store: store)
         case .exception(let e):
             let saved = try await transport.createException(id: e.id, calendarID: e.calendarID, masterID: e.masterID!,
                                                             originalStart: e.originalStart!, fields: e.fields, cancelled: e.cancelled)
-            landed(saved, after: pid, store: store)
+            landed(try live(saved), after: pid, store: store)
         case .update(let id, let base, let fields):
             do {
-                landed(try await transport.updateEvent(id: id, baseRev: base, fields: fields), after: pid, store: store)
+                landed(try live(try await transport.updateEvent(id: id, baseRev: base, fields: fields)), after: pid, store: store)
             } catch CalTransportError.conflict(let current?) where current.fields == fields && current.updatedBy == config.currentUserID {
                 // A retry of an update whose answer was lost: the server
                 // already has exactly this change, from us. Done, not a race.
-                landed(current, after: pid, store: store)
+                landed(try live(current), after: pid, store: store)
             }
         case .delete(let id, let base):
             do {
@@ -427,10 +463,11 @@ public final class CalendarEngine {
                 // Already gone (a retry whose answer was lost, or someone else
                 // deleted it): what we wanted either way.
             }
+            _ = try live(())
             store.removeEvent(id)
             store.removeExceptions(of: id)
         case .split(let master, let base, let at, let s, let discardNew):
-            let r = try await transport.splitSeries(masterID: master, baseRev: base, at: at, newID: s.id, fields: s.fields)
+            let r = try live(try await transport.splitSeries(masterID: master, baseRev: base, at: at, newID: s.id, fields: s.fields))
             landed(r.old, after: pid, store: store)
             if discardNew {
                 // "Delete this and following": the tail goes at once. It's never
@@ -445,17 +482,17 @@ public final class CalendarEngine {
                 landed(r.new, after: pid, store: store)
             }
         case .alerts(let id, let minutes):
-            store.putAlert(try await transport.setAlerts(eventID: id, minutesBefore: minutes))
+            store.putAlert(try live(try await transport.setAlerts(eventID: id, minutesBefore: minutes)))
         case .alertDefaults(let d):
-            store.alertDefaults = try await transport.setAlertDefaults(d)
+            store.alertDefaults = try live(try await transport.setAlertDefaults(d))
         case .pref(let id, let visible, let color):
             try await transport.setCalendarPref(calendarID: id, visible: visible, color: color)
         case .saveLabel(let l):
-            store.putLabel(try await transport.saveLabel(id: l.id, name: l.name, color: l.color))
+            store.putLabel(try live(try await transport.saveLabel(id: l.id, name: l.name, color: l.color)))
         case .deleteLabel(let id, _):
             try await transport.deleteLabel(id: id)
         case .updateCalendar(let name, let color):
-            let c = try await transport.updateCalendar(name: name, color: color)
+            let c = try live(try await transport.updateCalendar(name: name, color: color))
             store.updateCalendar(c.id) { $0.name = c.name; $0.color = c.color }
         }
     }

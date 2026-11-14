@@ -555,7 +555,11 @@ struct EngineTests {
         #expect(engine.calendars.isEmpty && engine.pendingCount == 0)
         #expect(engine.occurrences(from: nov.0, through: nov.1).isEmpty)
         server.set { $0.offline = false }
+        await engine.refresh() // signed out: does nothing
+        #expect(engine.calendars.isEmpty)
+        engine.start()         // signed back in
         await engine.refresh()
+        engine.stop()
         #expect(server.get { $0.writes }.isEmpty) // the queued write died with the wipe
         #expect(engine.occurrences(from: nov.0, through: nov.1).map(\.title) == ["x"])
     }
@@ -946,4 +950,103 @@ struct RetryPolicyTests {
         await engine.refresh()
         #expect(engine.pendingCount == 0)
     }
+}
+
+/// R13-R16, R40-R42: stop() and sign-out against work still in flight.
+@MainActor
+@Suite("Engine: stop and sign-out mid-flight", .serialized)
+struct LifecycleTests {
+    func waitUntilSending(_ engine: CalendarEngine) async {
+        for _ in 0..<2000 where !engine.isSyncing { await Task.yield() }
+    }
+
+    @Test func aWriteThatLandsAfterStopIsntSentAgain() async {
+        let (engine, server, own) = makeEngine()
+        await engine.refresh()
+        server.set { $0.delay = .milliseconds(120) }
+        engine.addEvent(to: own, allDay("once", 2026, 11, 3))
+        await waitUntilSending(engine)
+        engine.stop()
+        try? await Task.sleep(for: .milliseconds(300)) // the create lands
+        #expect(engine.pendingCount == 0, "a write the server applied stayed queued")
+        server.set { $0.delay = .zero }
+        await engine.refresh()
+        #expect(server.get { $0.writes.filter { $0.hasPrefix("create") }.count } == 1)
+        #expect(engine.notices.isEmpty)
+    }
+
+    @Test func nothingComesBackAfterSignOut() async {
+        let (engine, server, own) = makeEngine()
+        _ = server.externalCreate(own, allDay("theirs", 2026, 11, 2))
+        await engine.refresh()
+        server.set { $0.delay = .milliseconds(120) }
+        engine.addEvent(to: own, allDay("in flight", 2026, 11, 3))
+        await waitUntilSending(engine)
+        engine.wipeLocalStore()
+        try? await Task.sleep(for: .milliseconds(300)) // the create lands, a waiting refresh would run
+        await engine.refresh()                          // and so would this one
+        #expect(engine.calendars.isEmpty && engine.pendingCount == 0)
+        #expect(engine.occurrences(from: nov.0, through: nov.1, includeHidden: true).isEmpty)
+        // Signing back in starts clean and loads from the server.
+        engine.start()
+        await engine.refresh()
+        engine.stop()
+        #expect(engine.occurrences(from: nov.0, through: nov.1).count == 2)
+    }
+
+    @Test func signOutClearsRemindersEvenWithAReplanRunning() async {
+        let me = UUID()
+        let server = FakeServer(me: me)
+        let own = server.addCalendar(owner: me, role: .owner)
+        let center = SlowCenter()
+        let engine = CalendarEngine(config: CalendarConfig(baseURL: URL(string: "http://fake")!, currentUserID: me, tokenProvider: { "t" }),
+                                    transport: server, reminderCenter: center)
+        engine.storeInMemory = true
+        await engine.refresh()
+        let soon = Date().addingTimeInterval(3 * 3600)
+        engine.addEvent(to: own, CalEventFields(title: "Call", when: .timed(start: soon, end: soon, timeZone: TimeZone.current.identifier)), alerts: [15])
+        await engine.refresh()
+        engine.scheduleReplan()  // a replan on the (slow) center…
+        engine.wipeLocalStore()  // …and sign-out while it runs
+        try? await Task.sleep(for: .milliseconds(600))
+        #expect(center.all.isEmpty, "a reminder survived sign-out")
+    }
+
+    @Test func aLocalDeleteIsntUndoneByAPageAlreadyOnItsWay() async {
+        let (engine, server, own) = makeEngine()
+        let e = server.externalCreate(own, allDay("Dentist", 2026, 11, 10))
+        await engine.refresh()
+        server.externalUpdate(e.id) { $0.notes = "moved by them" } // so the next page carries it
+        server.set { $0.delay = .milliseconds(150) }
+        let sync = Task { await engine.refresh() }
+        await waitUntilSending(engine)
+        engine.deleteEvent(engine.event(e.id)!) // while that page is on its way
+        await sync.value
+        #expect(engine.event(e.id) == nil, "the page brought the deleted event back")
+        server.set { $0.delay = .zero }
+        await engine.refresh()
+    }
+
+    @Test func anErrorAfterStopIsntReported() async {
+        let (engine, server, _) = makeEngine()
+        await engine.refresh()
+        server.set { $0.delay = .milliseconds(120); $0.offline = true }
+        let sync = Task { await engine.refresh() }
+        await waitUntilSending(engine)
+        engine.stop()
+        await sync.value
+        #expect(engine.lastError == nil)
+    }
+}
+
+/// A notification center that answers slowly (a replan takes a while).
+final class SlowCenter: ReminderCenter, Sendable {
+    let inner = FakeCenter()
+    func pendingIDs() async -> [String] {
+        try? await Task.sleep(for: .milliseconds(200))
+        return await inner.pendingIDs()
+    }
+    func add(_ r: CalReminder) async throws { try await inner.add(r) }
+    func remove(_ ids: [String]) async { await inner.remove(ids) }
+    var all: [CalReminder] { inner.all }
 }
