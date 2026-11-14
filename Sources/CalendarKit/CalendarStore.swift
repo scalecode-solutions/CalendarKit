@@ -77,8 +77,11 @@ final class EventRecord {
             last = CalDate(end, in: TimeZone(identifier: tz) ?? .gmt).adding(days: 1)
         }
         if let r = e.fields.recurrence, e.masterID == nil {
-            guard let until = r.until else { return (dayNumber(first.adding(days: -1)), .max) }
-            last = until.adding(days: first.days(to: last) + 1)
+            // A counted series ends at its last occurrence: store that, so a
+            // finished "10 sessions" isn't fetched and expanded forever (R50).
+            let end = r.until ?? r.count.flatMap { CalRecurrenceExpander.dates(r, first: first, limit: $0).last }
+            guard let end else { return (dayNumber(first.adding(days: -1)), .max) }
+            last = end.adding(days: first.days(to: last) + 1)
         }
         return (dayNumber(first.adding(days: -1)), dayNumber(last))
     }

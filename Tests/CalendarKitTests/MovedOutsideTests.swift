@@ -43,4 +43,23 @@ struct MovedOutsideTests {
         let oct = engine.occurrences(from: CalDate(2026, 10, 1), through: CalDate(2026, 10, 25)) // a week the series doesn't reach
         #expect(oct.map(\.when.firstDay) == [CalDate(2026, 10, 20)])
     }
+
+    /// R23: expansion starts near the range, but an occurrence moved into it
+    /// from long before is still matched (and the original slot stays empty).
+    @Test func anOccurrenceMovedInFromMonthsBeforeShows() async {
+        let (engine, _, own) = makeEngine()
+        await engine.refresh()
+        let s = engine.addEvent(to: own, allDay("Pills", 2026, 1, 1, repeating: CalRecurrence(.daily)))
+        await engine.refresh()
+        let jan5 = engine.occurrences(from: CalDate(2026, 1, 5), through: CalDate(2026, 1, 5)).first { $0.seriesID == s.id }!
+        var f = jan5.event.fields
+        f.recurrence = nil
+        f.title = "Pills (moved)"
+        f.when = .allDay(start: CalDate(2026, 11, 10), end: CalDate(2026, 11, 11))
+        engine.updateOccurrence(jan5, f)
+        await engine.refresh()
+        let nov10 = engine.occurrences(from: CalDate(2026, 11, 10), through: CalDate(2026, 11, 10)).map(\.title)
+        #expect(nov10.sorted() == ["Pills", "Pills (moved)"])
+        #expect(engine.occurrences(from: CalDate(2026, 1, 5), through: CalDate(2026, 1, 5)).isEmpty)
+    }
 }

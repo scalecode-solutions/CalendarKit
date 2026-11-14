@@ -40,8 +40,12 @@ public enum CalRecurrenceExpander {
 
     /// The series' occurrence days, in order, starting at `first`. Stops at the
     /// rule's end, after `limit` occurrences, or past `through` (whichever is
-    /// first).
-    public static func dates(_ rule: CalRecurrence, first: CalDate, through: CalDate? = nil, limit: Int = .max) -> [CalDate] {
+    /// first). With `from`, only days on or after it are returned; without a
+    /// count, the periods before it are skipped outright instead of generated
+    /// (a daily series three years old: R23). A count still counts from the
+    /// start, so then the early days are generated but not returned.
+    public static func dates(_ rule: CalRecurrence, first: CalDate, from: CalDate? = nil, through: CalDate? = nil,
+                             limit: Int = .max) -> [CalDate] {
         let r = normalized(rule, first: first)
         var out: [CalDate] = []
         var produced = 0
@@ -49,8 +53,8 @@ public enum CalRecurrenceExpander {
         func emit(_ d: CalDate) -> Bool {
             if let u = r.until, d > u { return false }
             if let t = through, d > t { return false }
-            out.append(d)
             produced += 1
+            if from.map({ d >= $0 }) ?? true { out.append(d) }
             if let c = r.count, produced >= c { return false }
             return out.count < limit
         }
@@ -61,7 +65,17 @@ public enum CalRecurrenceExpander {
             return false
         }
         let monday = first.adding(days: -(first.isoWeekday - 1))
-        for step in 0..<maxSteps {
+        // Whole periods that end before `from` (only without a count).
+        var skip = 0
+        if let from, from > first, r.count == nil {
+            switch r.frequency {
+            case .daily: skip = first.days(to: from) / r.interval
+            case .weekly: skip = monday.days(to: from) / (7 * r.interval)
+            case .monthly: skip = max(0, ((from.year - first.year) * 12 + from.month - first.month - 1) / r.interval)
+            case .yearly: skip = max(0, (from.year - first.year - 1) / r.interval)
+            }
+        }
+        for step in skip..<(skip + maxSteps) {
             switch r.frequency {
             case .daily:
                 if !emit(first.adding(days: step * r.interval)) { return out }
@@ -93,12 +107,13 @@ public enum CalRecurrenceExpander {
 
     /// Timed series: occurrence start instants.
     public static func instants(_ rule: CalRecurrence, start: Date, timeZone: TimeZone,
-                                through: CalDate? = nil, limit: Int = .max) -> [Date] {
+                                from: CalDate? = nil, through: CalDate? = nil, limit: Int = .max) -> [Date] {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = timeZone
         let c = cal.dateComponents([.year, .month, .day, .hour, .minute, .second], from: start)
         let first = CalDate(c.year!, c.month!, c.day!)
-        return dates(rule, first: first, through: through, limit: limit).map {
+        // Only the days asked for get a wall clock (the costly part).
+        return dates(rule, first: first, from: from, through: through, limit: limit).map {
             wallClock($0, hour: c.hour!, minute: c.minute!, second: c.second!, in: timeZone)
         }
     }

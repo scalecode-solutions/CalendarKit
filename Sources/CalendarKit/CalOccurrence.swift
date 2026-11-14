@@ -72,17 +72,22 @@ enum OccurrenceBuilder {
             }
             let exs = byMaster[e.id] ?? []
             let exByStart = Dictionary(exs.compactMap { x in x.originalStart.map { ($0, x) } }, uniquingKeysWith: { a, _ in a })
-            // Expand far enough to reach the range and every exception's original.
+            // Expand from just before the range (zones can differ by a day) to
+            // just after it, widened to every exception's original so a moved
+            // occurrence is matched; nothing earlier is generated (R23).
             var horizon = through.adding(days: 1)
+            var earliest = from.adding(days: -2)
             for x in exs {
+                var d: CalDate?
                 switch x.originalStart {
-                case .date(let d): horizon = max(horizon, d)
+                case .date(let day): d = day
                 case .instant(let t):
-                    if case .timed(_, _, let tz) = e.fields.when { horizon = max(horizon, CalDate(t, in: TimeZone(identifier: tz) ?? .gmt)) }
+                    if case .timed(_, _, let tz) = e.fields.when { d = CalDate(t, in: TimeZone(identifier: tz) ?? .gmt) }
                 case nil: break
                 }
+                if let d { horizon = max(horizon, d); earliest = min(earliest, d) }
             }
-            for (original, when) in expand(e, rule: rule, through: horizon) {
+            for (original, when) in expand(e, rule: rule, from: earliest, through: horizon) {
                 if let x = exByStart[original] {
                     if x.cancelled { continue }
                     if overlaps(x.fields.when), let o = occurrence(x, series: e, original: original, when: x.fields.when) { out.append(o) }
@@ -94,18 +99,23 @@ enum OccurrenceBuilder {
         return out.sorted { $0.sortKey < $1.sortKey }
     }
 
-    /// A series' occurrences up to `through`: (original start, when).
-    static func expand(_ e: CalEvent, rule: CalRecurrence, through: CalDate) -> [(CalOriginalStart, CalWhen)] {
+    /// A series' occurrences from `from` (its days; nil = the start) up to
+    /// `through`: (original start, when).
+    static func expand(_ e: CalEvent, rule: CalRecurrence, from: CalDate? = nil, through: CalDate) -> [(CalOriginalStart, CalWhen)] {
         switch e.fields.when {
         case .allDay(let s, let end):
             let len = s.days(to: end)
-            return CalRecurrenceExpander.dates(rule, first: s, through: through).map { d in
+            // An all-day occurrence that starts before `from` can still reach into it.
+            return CalRecurrenceExpander.dates(rule, first: s, from: from?.adding(days: -len), through: through).map { d in
                 (.date(d), .allDay(start: d, end: d.adding(days: len)))
             }
         case .timed(let s, let end, let tz):
             let zone = TimeZone(identifier: tz) ?? .gmt
             let duration = end.timeIntervalSince(s)
-            return CalRecurrenceExpander.instants(rule, start: s, timeZone: zone, through: through).map { t in
+            // Likewise a long timed one: back off by its length in days.
+            let back = Int((duration / 86_400).rounded(.up))
+            return CalRecurrenceExpander.instants(rule, start: s, timeZone: zone, from: from?.adding(days: -back),
+                                                  through: through).map { t in
                 (.instant(t), .timed(start: t, end: t.addingTimeInterval(duration), timeZone: tz))
             }
         }
