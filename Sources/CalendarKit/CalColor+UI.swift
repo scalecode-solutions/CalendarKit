@@ -21,11 +21,11 @@ public extension CalColor {
         return (l + 0.05) / 0.05 > 1.05 / (l + 0.05)
     }
 
-    /// The contrast ratio of `onColor` on this color. Never below ~4.58:1, since
-    /// one of black and white always clears that on any color.
+    /// The contrast ratio of the text `onColor` actually picks on this color.
+    /// The better of black and white always clears ~4.58:1 on any color.
     func textContrast(dark: Bool) -> Double {
         let l = luminance(dark: dark)
-        return max((l + 0.05) / 0.05, 1.05 / (l + 0.05))
+        return textIsBlack(dark: dark) ? (l + 0.05) / 0.05 : 1.05 / (l + 0.05)
     }
 
     /// WCAG 2 relative luminance of this scheme's color.
