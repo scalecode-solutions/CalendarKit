@@ -1,9 +1,9 @@
 import SwiftUI
 
 public extension CalColor {
-    /// The color for this scheme. Light variants are deep enough to read as text
-    /// on the light card (at least 4.5:1, see AccentTextTests); dark ones are
-    /// a little brighter. `.none` draws as the kit's default, indigo,
+    /// The color for this scheme. Each variant reads as text on its scheme's
+    /// card (at least 4.5:1) and stays apart from every other color (CIE76
+    /// distance at least 22), picked in CIELCh by hue; see AccentTextTests. `.none` draws as the kit's default, indigo,
     /// everywhere (events, dots, the backdrop, the accent).
     func color(dark: Bool) -> Color {
         let (l, d) = rgb
@@ -29,10 +29,12 @@ public extension CalColor {
         return textIsBlack(dark: dark) ? (l + 0.05) / 0.05 : 1.05 / (l + 0.05)
     }
 
+    /// The sRGB components for this scheme, 0...255.
+    func components(dark: Bool) -> (Int, Int, Int) { dark ? rgb.dark : rgb.light }
+
     /// WCAG 2 relative luminance of this scheme's color.
     func luminance(dark: Bool) -> Double {
-        let (l, d) = rgb
-        let c = dark ? d : l
+        let c = components(dark: dark)
         func lin(_ v: Int) -> Double {
             let s = Double(v) / 255
             return s <= 0.04045 ? s / 12.92 : pow((s + 0.055) / 1.055, 2.4)
@@ -45,20 +47,20 @@ public extension CalColor {
 
     private var rgb: (light: (Int, Int, Int), dark: (Int, Int, Int)) {
         switch self {
-        case .red:    ((212, 49, 49), (255, 105, 100))
-        case .orange: ((179, 87, 0), (255, 160, 70))
-        case .yellow: ((145, 105, 0), (250, 210, 60))
-        case .green:  ((35, 130, 52), (95, 210, 110))
-        case .mint:   ((0, 129, 97), (90, 220, 180))
-        case .teal:   ((0, 126, 126), (50, 200, 190))
-        case .cyan:   ((0, 123, 154), (60, 210, 245))
-        case .sky:    ((33, 116, 191), (100, 190, 255))
-        case .blue: ((30, 90, 220), (90, 140, 255))
-        case .none, .indigo: ((80, 70, 200), (130, 120, 255))
-        case .purple: ((140, 60, 200), (190, 120, 245))
-        case .pink:   ((199, 55, 130), (255, 120, 185))
-        case .brown:  ((140, 95, 60), (200, 150, 110))
-        case .gray:   ((108, 113, 123), (165, 170, 180))
+        case .red:    ((226, 2, 46), (255, 146, 137))
+        case .orange: ((188, 80, 0), (255, 167, 109))
+        case .yellow: ((145, 106, 2), (255, 213, 102))
+        case .green:  ((62, 128, 1), (130, 220, 73))
+        case .mint:   ((0, 130, 70), (8, 232, 158))
+        case .teal:   ((4, 126, 110), (4, 198, 178))
+        case .cyan:   ((5, 124, 146), (13, 224, 248))
+        case .sky:    ((2, 99, 153), (25, 196, 254))
+        case .blue:   ((3, 85, 174), (158, 194, 254))
+        case .none, .indigo: ((1, 45, 204), (175, 166, 255))
+        case .purple: ((164, 2, 209), (224, 146, 255))
+        case .pink:   ((217, 1, 133), (255, 140, 186))
+        case .brown:  ((119, 77, 56), (215, 170, 138))
+        case .gray:   ((115, 112, 108), (185, 182, 175))
         }
     }
 }
