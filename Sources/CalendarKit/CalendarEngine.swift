@@ -637,7 +637,13 @@ public final class CalendarEngine {
         }
         guard splitDay > firstDay else { return updateEvent(series, fields) }
         var f = fields
-        if f.recurrence == nil { f.recurrence = rule }
+        // Repeat = Never means just what it says: the rest becomes this one
+        // event (R36). A count left as it was means the series' total: the
+        // new series gets what's left, not the whole count again (R3).
+        if let total = rule.count, f.recurrence?.count == total {
+            let before = CalRecurrenceExpander.dates(rule, first: firstDay, through: splitDay.adding(days: -1)).count
+            f.recurrence?.count = max(1, total - before)
+        }
         let newSeries = newEvent(calendarID: series.calendarID, fields: f)
         var old = series
         old.fields.recurrence?.count = nil

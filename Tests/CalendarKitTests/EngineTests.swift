@@ -797,3 +797,44 @@ struct RuleOrderTests {
         #expect(engine.occurrences(from: nov.0, through: nov.1).count == before, "the cancelled occurrence came back")
     }
 }
+
+/// R3/R37/R36: "this and following" on a count-limited series, and with
+/// Repeat = Never.
+@MainActor
+@Suite("Engine: following on counted series", .serialized)
+struct FollowingCountTests {
+    let all = (CalDate(2026, 11, 1), CalDate(2027, 3, 31))
+
+    @Test func theNewSeriesGetsTheRemainingCount() async {
+        let (engine, server, own) = makeEngine()
+        await engine.refresh()
+        let s = engine.addEvent(to: own, allDay("PT", 2026, 11, 2, repeating: CalRecurrence(.weekly, count: 10)))
+        await engine.refresh()
+        let fourth = engine.occurrences(from: all.0, through: all.1).filter { $0.seriesID == s.id }[3]
+        var f = engine.event(s.id)!.fields // the editor starts from the series' fields: count 10
+        f.title = "PT (new clinic)"
+        f.when = fourth.when
+        engine.updateFollowing(fourth, f)
+        await engine.refresh()
+        let occ = engine.occurrences(from: all.0, through: all.1)
+        #expect(occ.count == 10, "a 10-session series became \(occ.count)")
+        #expect(occ.filter { $0.title == "PT (new clinic)" }.count == 7)
+        #expect(engine.notices.isEmpty)
+        _ = server
+    }
+
+    @Test func repeatNeverMakesTheRestOneEvent() async {
+        let (engine, _, own) = makeEngine()
+        await engine.refresh()
+        let s = engine.addEvent(to: own, allDay("Gym", 2026, 11, 2, repeating: CalRecurrence(.weekly)))
+        await engine.refresh()
+        let third = engine.occurrences(from: nov.0, through: nov.1).filter { $0.seriesID == s.id }[2]
+        var f = third.event.fields
+        f.recurrence = nil // Repeat: Never
+        f.when = third.when
+        f.title = "Gym (last time)"
+        engine.updateFollowing(third, f)
+        await engine.refresh()
+        #expect(engine.occurrences(from: nov.0, through: nov.1).map(\.title) == ["Gym", "Gym", "Gym (last time)"])
+    }
+}
