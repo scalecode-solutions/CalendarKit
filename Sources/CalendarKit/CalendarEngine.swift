@@ -278,11 +278,13 @@ public final class CalendarEngine {
         // A calendar this device holds nothing confirmed for (cursor 0) that the
         // server sends no delta for has nothing on the server: drop leftovers.
         let withDelta = Set(page.deltas.map(\.calendarID))
-        for c in page.calendars where held[c.id, default: 0] == 0 && !withDelta.contains(c.id) {
+        for c in page.calendars where (held[c.id]?.rev ?? 0) == 0 && !withDelta.contains(c.id) {
             store.clearForReload(c.id)
         }
         for d in page.deltas {
-            if d.reload || held[d.calendarID, default: 0] == 0 {
+            // Only the first page of a load (or a reload) starts from nothing;
+            // later pages of the same load add to it.
+            if d.reload || (held[d.calendarID]?.rev ?? 0) == 0 {
                 store.clearForReload(d.calendarID)
             }
             for e in d.events where !store.isPending(e.id) {
@@ -294,7 +296,7 @@ public final class CalendarEngine {
             }
             for l in d.labels { store.putLabel(l) }
             for id in d.deletedLabelIDs { store.removeLabel(id) }
-            store.setCursor(d.calendarID, d.rev)
+            store.setCursor(d.calendarID, d.rev, loadFrom: d.loadFrom)
         }
         for a in page.alerts { store.putAlert(a) }
         store.alertsCursor = page.alerts.count >= 5000 ? (page.alerts.map(\.rev).max() ?? store.alertsCursor) : page.alertsRev

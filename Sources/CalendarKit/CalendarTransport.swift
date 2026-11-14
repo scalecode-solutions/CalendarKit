@@ -36,7 +36,7 @@ public enum CalTransportError: Error, Sendable, Equatable {
 
 /// The kit's view of the server. A protocol so tests and previews can fake it.
 public protocol CalendarTransport: Sendable {
-    func sync(cursors: [UUID: Int64], alertsCursor: Int64) async throws -> CalSyncPage
+    func sync(cursors: [UUID: CalCursor], alertsCursor: Int64) async throws -> CalSyncPage
 
     func createEvent(id: UUID, calendarID: UUID, fields: CalEventFields) async throws -> CalEvent
     /// An exception to one occurrence of a series (cancelled = removes it; then
@@ -62,6 +62,13 @@ public protocol CalendarTransport: Sendable {
     func revokeGrant(id: UUID) async throws
     func listGrants() async throws -> [CalGrant]
     func listActivity(cursor: String?, limit: Int) async throws -> (rows: [CalActivity], next: String?)
+}
+
+public extension CalendarTransport {
+    /// Delta cursors only (no load in progress).
+    func sync(cursors: [UUID: Int64], alertsCursor: Int64) async throws -> CalSyncPage {
+        try await sync(cursors: cursors.mapValues { CalCursor(rev: $0) }, alertsCursor: alertsCursor)
+    }
 }
 
 /// `CalendarTransport` over Connect/protobuf. Wraps the generated client and
@@ -111,12 +118,13 @@ public struct ConnectCalendarTransport: CalendarTransport {
 
     // MARK: sync
 
-    public func sync(cursors: [UUID: Int64], alertsCursor: Int64) async throws -> CalSyncPage {
+    public func sync(cursors: [UUID: CalCursor], alertsCursor: Int64) async throws -> CalSyncPage {
         var req = Calendar_V1_SyncRequest()
-        req.cursors = cursors.map { id, rev in
+        req.cursors = cursors.map { id, cur in
             var c = Calendar_V1_CalendarCursor()
             c.calendarID = id.uuidString.lowercased()
-            c.rev = rev
+            c.rev = cur.rev
+            c.loadFrom = cur.loadFrom
             return c
         }
         req.alertsCursor = alertsCursor
@@ -435,7 +443,7 @@ enum Wire {
                          events: try d.events.map(event),
                          labels: try d.labels.filter { !$0.deleted }.map(label),
                          deletedLabelIDs: try d.labels.filter(\.deleted).map { try uuid($0.id) },
-                         rev: d.rev, hasMore: d.hasMore_p, reload: d.reload)
+                         rev: d.rev, hasMore: d.hasMore_p, reload: d.reload, loadFrom: d.loadFrom)
             },
             gone: try w.gone.map(uuid),
             alerts: try w.alerts.map(alert),

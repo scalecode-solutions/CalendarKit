@@ -640,6 +640,9 @@ public nonisolated struct Calendar_V1_CalendarCursor: Sendable {
 
   public var rev: Int64 = 0
 
+  /// Mid full load: echo the load_from of the last delta (0 otherwise).
+  public var loadFrom: Int64 = 0
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -680,6 +683,11 @@ public nonisolated struct Calendar_V1_CalendarDelta: Sendable {
   /// The cursor was too old (deletions behind it were purged): drop everything
   /// held for this calendar; this delta starts from the beginning.
   public var reload: Bool = false
+
+  /// Set while a full load is still paging (has_more): the calendar's rev when
+  /// the load started. Send it back on the cursor until has_more is false, so a
+  /// purge during the load is judged against the load, not the page.
+  public var loadFrom: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -2076,7 +2084,7 @@ nonisolated extension Calendar_V1_AlertDefaults: SwiftProtobuf.Message, SwiftPro
 
 nonisolated extension Calendar_V1_CalendarCursor: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CalendarCursor"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}calendar_id\0\u{1}rev\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}calendar_id\0\u{1}rev\0\u{3}load_from\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2086,6 +2094,7 @@ nonisolated extension Calendar_V1_CalendarCursor: SwiftProtobuf.Message, SwiftPr
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.calendarID) }()
       case 2: try { try decoder.decodeSingularInt64Field(value: &self.rev) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.loadFrom) }()
       default: break
       }
     }
@@ -2098,12 +2107,16 @@ nonisolated extension Calendar_V1_CalendarCursor: SwiftProtobuf.Message, SwiftPr
     if self.rev != 0 {
       try visitor.visitSingularInt64Field(value: self.rev, fieldNumber: 2)
     }
+    if self.loadFrom != 0 {
+      try visitor.visitSingularInt64Field(value: self.loadFrom, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Calendar_V1_CalendarCursor, rhs: Calendar_V1_CalendarCursor) -> Bool {
     if lhs.calendarID != rhs.calendarID {return false}
     if lhs.rev != rhs.rev {return false}
+    if lhs.loadFrom != rhs.loadFrom {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -2146,7 +2159,7 @@ nonisolated extension Calendar_V1_SyncRequest: SwiftProtobuf.Message, SwiftProto
 
 nonisolated extension Calendar_V1_CalendarDelta: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CalendarDelta"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}calendar_id\0\u{1}events\0\u{1}labels\0\u{1}rev\0\u{3}has_more\0\u{1}reload\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}calendar_id\0\u{1}events\0\u{1}labels\0\u{1}rev\0\u{3}has_more\0\u{1}reload\0\u{3}load_from\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2160,6 +2173,7 @@ nonisolated extension Calendar_V1_CalendarDelta: SwiftProtobuf.Message, SwiftPro
       case 4: try { try decoder.decodeSingularInt64Field(value: &self.rev) }()
       case 5: try { try decoder.decodeSingularBoolField(value: &self.hasMore_p) }()
       case 6: try { try decoder.decodeSingularBoolField(value: &self.reload) }()
+      case 7: try { try decoder.decodeSingularInt64Field(value: &self.loadFrom) }()
       default: break
       }
     }
@@ -2184,6 +2198,9 @@ nonisolated extension Calendar_V1_CalendarDelta: SwiftProtobuf.Message, SwiftPro
     if self.reload != false {
       try visitor.visitSingularBoolField(value: self.reload, fieldNumber: 6)
     }
+    if self.loadFrom != 0 {
+      try visitor.visitSingularInt64Field(value: self.loadFrom, fieldNumber: 7)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -2194,6 +2211,7 @@ nonisolated extension Calendar_V1_CalendarDelta: SwiftProtobuf.Message, SwiftPro
     if lhs.rev != rhs.rev {return false}
     if lhs.hasMore_p != rhs.hasMore_p {return false}
     if lhs.reload != rhs.reload {return false}
+    if lhs.loadFrom != rhs.loadFrom {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

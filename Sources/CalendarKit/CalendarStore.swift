@@ -31,6 +31,9 @@ final class CalendarRecord {
     var payload: Data      // CalCalendar
     var cursor: Int64      // how far this device has synced it
     var position: Int      // the server's order (own first)
+    /// While a paged full load is under way: the rev it started at (0 = none).
+    /// Defaulted so existing (Lab) stores migrate automatically.
+    var loadFrom: Int64 = 0
 
     init(id: UUID, payload: Data, cursor: Int64, position: Int) {
         self.id = id
@@ -213,8 +216,10 @@ final class CalendarStore {
         return rows.compactMap { r in decode(CalCalendar.self, r.payload).map { ($0, r.cursor) } }
     }
 
-    func cursors() -> [UUID: Int64] {
-        Dictionary(uniqueKeysWithValues: ((try? context.fetch(FetchDescriptor<CalendarRecord>())) ?? []).map { ($0.id, $0.cursor) })
+    func cursors() -> [UUID: CalCursor] {
+        Dictionary(uniqueKeysWithValues: ((try? context.fetch(FetchDescriptor<CalendarRecord>())) ?? []).map {
+            ($0.id, CalCursor(rev: $0.cursor, loadFrom: $0.loadFrom))
+        })
     }
 
     private func calendarRecord(_ id: UUID) -> CalendarRecord? {
@@ -233,10 +238,14 @@ final class CalendarStore {
         }
     }
 
-    func setCursor(_ id: UUID, _ rev: Int64) { calendarRecord(id)?.cursor = rev }
+    func setCursor(_ id: UUID, _ rev: Int64, loadFrom: Int64 = 0) {
+        guard let r = calendarRecord(id) else { return }
+        r.cursor = rev
+        r.loadFrom = loadFrom
+    }
 
     /// Make the next sync reload this calendar from scratch.
-    func resetCursor(_ id: UUID) { calendarRecord(id)?.cursor = 0 }
+    func resetCursor(_ id: UUID) { setCursor(id, 0) }
 
     func updateCalendar(_ id: UUID, _ change: (inout CalCalendar) -> Void) {
         guard let r = calendarRecord(id), var c = decode(CalCalendar.self, r.payload) else { return }

@@ -264,6 +264,18 @@ public struct CalActivity: Identifiable, Equatable, Sendable {
     public let eventID: UUID?
 }
 
+/// Where this device is in one calendar: the server's rev it has seen, and,
+/// while a paged full load is under way, the rev that load started at (the
+/// server judges purges against it; 0 otherwise).
+public struct CalCursor: Equatable, Sendable {
+    public var rev: Int64
+    public var loadFrom: Int64
+    public init(rev: Int64, loadFrom: Int64 = 0) {
+        self.rev = rev
+        self.loadFrom = loadFrom
+    }
+}
+
 /// One calendar's changes since a cursor.
 public struct CalDelta: Equatable, Sendable {
     public let calendarID: UUID
@@ -274,6 +286,8 @@ public struct CalDelta: Equatable, Sendable {
     public let hasMore: Bool
     /// Drop everything held for this calendar first: the cursor was too old.
     public let reload: Bool
+    /// While a full load is still paging: echo it back on the next cursor.
+    public var loadFrom: Int64 = 0
 }
 
 /// One Sync answer.

@@ -21,6 +21,10 @@ final class FakeServer: CalendarTransport, Sendable {
         var syncs = 0
         /// Simulated network latency per call.
         var delay: Duration = .zero
+        /// Rows per Sync page per calendar (the server's SYNC_PAGE_LIMIT).
+        var pageLimit = 500
+        /// Per calendar: the newest purged tombstone's rev (the server's purged_rev).
+        var purgedRev: [UUID: Int64] = [:]
     }
     let state: Mutex<State>
 
@@ -65,6 +69,25 @@ final class FakeServer: CalendarTransport, Sendable {
         }
     }
 
+    /// Purge every tombstone (as the server's daily purge does past retention).
+    func purge() {
+        set { s in
+            for (id, e) in s.events where e.deleted {
+                s.purgedRev[e.calendarID] = max(s.purgedRev[e.calendarID] ?? 0, e.rev)
+                s.events[id] = nil
+            }
+        }
+    }
+
+    func externalDelete(_ id: UUID) {
+        set { s in
+            guard var e = s.events[id] else { return }
+            e.deleted = true
+            e.rev = bump(&s, e.calendarID)
+            s.events[id] = e
+        }
+    }
+
     func externalCreate(_ cal: UUID, _ fields: CalEventFields) -> CalEvent {
         state.withLock { s in
             let e = CalEvent(id: UUID(), calendarID: cal, fields: fields, masterID: nil, originalStart: nil, cancelled: false,
@@ -81,19 +104,37 @@ final class FakeServer: CalendarTransport, Sendable {
         if d > .zero { try? await Task.sleep(for: d) }
     }
 
-    func sync(cursors: [UUID: Int64], alertsCursor: Int64) async throws -> CalSyncPage {
+    func sync(cursors: [UUID: CalCursor], alertsCursor: Int64) async throws -> CalSyncPage {
         await latency()
         return try state.withLock { s in
             if s.offline { throw CalTransportError.unavailable("offline") }
             s.syncs += 1
+            // The real server's paging and reload rules (internal/store/sync.go):
+            // pages never split one rev; a load cursor is judged by load_from.
             let deltas: [CalDelta] = s.calendars.compactMap { c in
-                let cur = cursors[c.id] ?? 0
-                guard cur < c.rev else { return nil }
-                let evs = s.events.values.filter { $0.calendarID == c.id && $0.rev > cur && (cur > 0 || !$0.deleted) }
-                let ls = s.labels.values.filter { $0.0.calendarID == c.id && $0.0.rev > cur }
-                return CalDelta(calendarID: c.id, events: evs.sorted { $0.rev < $1.rev },
-                                labels: ls.filter { !$0.deleted }.map(\.0), deletedLabelIDs: ls.filter(\.deleted).map(\.0.id),
-                                rev: c.rev, hasMore: false, reload: false)
+                var cur = max(0, cursors[c.id]?.rev ?? 0)
+                var loadFrom = cur == 0 ? 0 : max(0, cursors[c.id]?.loadFrom ?? 0)
+                let purged = s.purgedRev[c.id] ?? 0
+                let reset = loadFrom > 0 ? loadFrom < purged : (cur > 0 && cur < purged)
+                if reset { cur = 0; loadFrom = 0 }
+                guard cur < c.rev || reset else { return nil }
+                let live = cur == 0
+                let evs = s.events.values.filter { $0.calendarID == c.id && $0.rev > cur && (!live || !$0.deleted) }
+                let ls = s.labels.values.filter { $0.0.calendarID == c.id && $0.0.rev > cur && (!live || !$0.deleted) }
+                let revs = (evs.map(\.rev) + ls.map(\.0.rev)).sorted()
+                var hi = c.rev
+                var more = false
+                if revs.count > s.pageLimit {
+                    let boundary = revs[s.pageLimit]
+                    hi = boundary - 1 > cur ? boundary - 1 : boundary
+                    more = hi < c.rev
+                }
+                let pageEvents = evs.filter { $0.rev <= hi }.sorted { $0.rev < $1.rev }
+                let pageLabels = ls.filter { $0.0.rev <= hi }
+                return CalDelta(calendarID: c.id, events: pageEvents,
+                                labels: pageLabels.filter { !$0.deleted }.map(\.0), deletedLabelIDs: pageLabels.filter(\.deleted).map(\.0.id),
+                                rev: hi, hasMore: more, reload: reset,
+                                loadFrom: more ? (cur == 0 ? c.rev : loadFrom) : 0)
             }
             let gone = cursors.keys.filter { id in !s.calendars.contains { $0.id == id } }
             return CalSyncPage(calendars: s.calendars, deltas: deltas, gone: gone,
@@ -513,5 +554,40 @@ struct DeleteFollowingTests {
         #expect(server.get { $0.writes }.suffix(2) == ["split", "delete"])
         #expect(engine.occurrences(from: nov.0, through: nov.1).map(\.title) == local)
         #expect(engine.pendingCount == 0 && engine.notices.isEmpty)
+    }
+}
+
+@MainActor
+@Suite("Engine: paged loads (R4)", .serialized)
+struct PagedLoadTests {
+    @Test func aBigPurgedCalendarLoadsCompletely() async {
+        let (engine, server, own) = makeEngine()
+        var made: [CalEvent] = []
+        for i in 0..<14 { made.append(server.externalCreate(own, allDay("e\(i)", 2026, 11, 1 + i))) }
+        server.externalDelete(made[13].id)
+        server.purge()
+        server.set { $0.pageLimit = 3 }
+        await engine.refresh()
+        #expect(engine.loadState == .loaded)
+        #expect(engine.occurrences(from: nov.0, through: nov.1).count == 13)
+        #expect(server.get { $0.syncs } >= 4 && server.get { $0.syncs } < 20) // paged, and it ended
+    }
+
+    @Test func aPurgeOfRowsWeHoldMidLoadReloadsInsteadOfKeepingAGhost() async {
+        let (engine, server, own) = makeEngine()
+        var made: [CalEvent] = []
+        for i in 0..<9 { made.append(server.externalCreate(own, allDay("e\(i)", 2026, 11, 1 + i))) }
+        server.set { $0.pageLimit = 3; $0.delay = .milliseconds(30) }
+        // Mid-load (after page 1 lands), delete a row from page 1 and purge it.
+        let refresh = Task { await engine.refresh() }
+        for _ in 0..<500 where server.get({ $0.syncs }) < 1 { await Task.yield() }
+        try? await Task.sleep(for: .milliseconds(40))
+        server.externalDelete(made[0].id)
+        server.purge()
+        await refresh.value
+        await engine.refresh()
+        let titles = Set(engine.occurrences(from: nov.0, through: nov.1).map(\.title))
+        #expect(!titles.contains("e0"), "the deleted row survived as a ghost")
+        #expect(titles.count == 8)
     }
 }
