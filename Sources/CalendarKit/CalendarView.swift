@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// The calendar: a month grid with a dot per calendar on each day and the
-/// selected day's events below, or an agenda of everything coming up. The kit
+/// The calendar: a month grid with each day's events as colored title chips and
+/// the selected day's events below, or an agenda of everything coming up.
+/// Above both, a chip per person whose calendar you see, to show or hide it. The kit
 /// owns its content (the Month/Agenda switch and "+" sit in it); the HOST owns
 /// the navigation bar (title, back, its own buttons) and pushes
 /// `CalendarSettingsView` from wherever it likes (e.g. a trailing gear).
@@ -48,6 +49,7 @@ public struct CalendarView: View {
                     NoticeBanner(notice: n) { engine.dismissNotice(n) }
                 }
                 controls
+                if engine.calendars.count > 1 { PeopleBar(engine: engine) }
                 switch mode {
                 case .month: monthContent
                 case .agenda:
@@ -116,6 +118,8 @@ public struct CalendarView: View {
         .padding(.bottom, 8)
         .calendarCard(cornerRadius: 28)
         .padding(.horizontal, 12)
+        // The grid takes the height its chips need; the day's list gets the rest.
+        .fixedSize(horizontal: false, vertical: true)
         DayList(day: selected, occurrences: index[selected] ?? [], engine: engine, appearance: appearance,
                 showOwners: engine.calendars.filter(\.visible).count > 1) { detail = $0 }
     }
@@ -170,9 +174,9 @@ public struct CalendarView: View {
             ForEach(layout.weeks, id: \.first) { week in
                 HStack(spacing: 0) {
                     ForEach(week, id: \.self) { day in
+                        let occ = index[day] ?? []
                         DayCell(day: day, inMonth: layout.contains(day), isToday: day == today,
-                                isSelected: day == selected, colors: dotColors(index[day] ?? []),
-                                eventCount: index[day]?.count ?? 0)
+                                isSelected: day == selected, chips: DayChip.chips(occ), eventCount: occ.count)
                             .onTapGesture {
                                 selected = day
                                 if !layout.contains(day) { month = (day.year, day.month) }
@@ -182,18 +186,6 @@ public struct CalendarView: View {
             }
         }
         .padding(.horizontal, 6)
-    }
-
-    /// One dot per calendar with something that day (at most 3).
-    private func dotColors(_ occ: [CalOccurrence]) -> [CalColor] {
-        var seen: [UUID] = []
-        var out: [CalColor] = []
-        for o in occ where !seen.contains(o.calendar.id) {
-            seen.append(o.calendar.id)
-            out.append(o.calendar.displayColor)
-            if out.count == 3 { break }
-        }
-        return out
     }
 
     private func step(_ n: Int) {
@@ -208,8 +200,10 @@ public enum CalendarMode: String, Sendable {
     case month, agenda
 }
 
-/// Everything coming up, from today, grouped by day (empty days skipped).
-/// Reaches further as you scroll.
+/// Everything coming up, from today, grouped by day (empty days skipped),
+/// under a strip of the coming week's days. Day headers stay pinned while their
+/// events scroll under them; each row leads with its time. Reaches further as
+/// you scroll.
 struct AgendaList: View {
     let engine: CalendarEngine
     let appearance: CalendarAppearance
@@ -230,50 +224,190 @@ struct AgendaList: View {
 
     var body: some View {
         let g = groups
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 10) {
-                if g.isEmpty {
-                    Text(appearance.emptyAgenda)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                        .calendarCard(cornerRadius: 20)
-                }
-                ForEach(g, id: \.0) { day, occ in
-                    Text(title(day))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(day == today ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                        .padding(.horizontal, 8)
-                        .padding(.top, 6)
-                        .accessibilityAddTraits(.isHeader)
-                    ForEach(occ) { o in
-                        Button { open(o) } label: {
-                            OccurrenceRow(occurrence: o, day: day, engine: engine, showOwner: showOwners)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 12)
-                                .calendarCard(cornerRadius: 20)
-                        }
-                        .buttonStyle(.plain)
+        ScrollViewReader { proxy in
+            VStack(spacing: 8) {
+                WeekStrip(today: today, marks: Dictionary(g.prefix(14).map { ($0.0, Array(Set($0.1.map(\.color))).prefix(3).map { $0 }) },
+                                                          uniquingKeysWith: { a, _ in a })) { day in
+                    // The first day with something on it, from the one tapped.
+                    if let target = g.first(where: { $0.0 >= day })?.0 {
+                        withAnimation(.snappy) { proxy.scrollTo(target, anchor: .top) }
                     }
                 }
-                // Reaching the end loads further ahead (up to two years).
-                if days < 730 {
-                    Color.clear.frame(height: 1).onAppear { days = min(730, days + 60) }
+                .padding(.horizontal, 12)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8, pinnedViews: [.sectionHeaders]) {
+                        if g.isEmpty {
+                            Text(appearance.emptyAgenda)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(16)
+                                .calendarCard(cornerRadius: 20)
+                        }
+                        ForEach(g, id: \.0) { day, occ in
+                            Section {
+                                // Keyed by day too: a multi-day event is one occurrence on
+                                // several days, and one id twice in a lazy stack drew only
+                                // the first (the second day showed a blank gap).
+                                ForEach(occ.map { AgendaItem(day: day, occurrence: $0) }) { item in
+                                    Button { open(item.occurrence) } label: {
+                                        AgendaRow(occurrence: item.occurrence, day: day, engine: engine, showOwner: showOwners)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            } header: {
+                                AgendaHeader(day: day, today: today).id(day)
+                            }
+                        }
+                        // Reaching the end loads further ahead (up to two years).
+                        if days < 730 {
+                            Color.clear.frame(height: 1).onAppear { days = min(730, days + 60) }
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 24)
                 }
+                .scrollIndicators(.hidden)
+                .refreshable { await engine.refresh() }
             }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 24)
         }
-        .scrollIndicators(.hidden)
-        .refreshable { await engine.refresh() }
+    }
+}
+
+/// An occurrence on one of its days (the agenda's identity for a row).
+struct AgendaItem: Identifiable {
+    let day: CalDate
+    let occurrence: CalOccurrence
+    var id: String { "\(day)|\(occurrence.id)" }
+}
+
+/// A pinned day header: "Today", "Tomorrow", else the weekday and date, with
+/// the date beside the first two so they still say which day.
+struct AgendaHeader: View {
+    let day: CalDate
+    let today: CalDate
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title).font(.subheadline.weight(.semibold))
+                .foregroundStyle(day == today ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+            if let sub {
+                Text(sub).font(.subheadline).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        // Pinned over scrolling rows: mostly opaque, so their text doesn't
+        // show through the label.
+        .background(Capsule().fill(Color(uiColor: .systemBackground).opacity(0.75)))
+        .glassEffect(.regular, in: Capsule())
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 
-    private func title(_ d: CalDate) -> String {
-        switch today.days(to: d) {
+    private var title: String {
+        switch today.days(to: day) {
         case 0: return "Today"
         case 1: return "Tomorrow"
-        default:
-            return CalFormat.template(d.year == today.year ? "EEEEMMMMd" : "EEEEMMMMdyyyy").string(from: d.utcMidnight)
+        default: return CalFormat.template(day.year == today.year ? "EEEEMMMd" : "EEEEMMMdyyyy").string(from: day.utcMidnight)
+        }
+    }
+
+    private var sub: String? {
+        today.days(to: day) <= 1 ? CalFormat.template("EEEMMMd").string(from: day.utcMidnight) : nil
+    }
+}
+
+/// The next seven days, a day per column: the weekday, the date (today in the accent),
+/// and a dot per color with something that day. Tapping a day jumps the
+/// agenda to it (or to the next day with something on).
+struct WeekStrip: View {
+    let today: CalDate
+    let marks: [CalDate: [CalColor]]
+    let jump: (CalDate) -> Void
+    @Environment(\.calendarAccent) private var accent
+
+    /// The coming week, today first: what's ahead is what the agenda is for.
+    private var week: [CalDate] { (0..<7).map { today.adding(days: $0) } }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(week, id: \.self) { d in
+                Button { jump(d) } label: {
+                    VStack(spacing: 4) {
+                        Text(WeekdayChips.letter(d.isoWeekday)).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                        Text("\(d.day)")
+                            .font(.subheadline.weight(d == today ? .bold : .regular))
+                            .foregroundStyle(d == today ? AnyShapeStyle(CalOnTint(accent)) : AnyShapeStyle(.primary))
+                            .frame(width: 30, height: 30)
+                            .background { if d == today { Circle().fill(.tint) } }
+                        HStack(spacing: 2) {
+                            ForEach(Array((marks[d] ?? []).enumerated()), id: \.offset) { _, c in
+                                Circle().fill(CalTint(c)).frame(width: 4, height: 4)
+                            }
+                        }
+                        .frame(height: 4)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(DayCell.spoken(d, isToday: d == today, events: marks[d] == nil ? 0 : 1))
+            }
+        }
+        .padding(.vertical, 8)
+        .calendarCard(cornerRadius: 22)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+}
+
+/// An agenda row: the time first, then the event (Fantastical's reading order).
+struct AgendaRow: View {
+    let occurrence: CalOccurrence
+    let day: CalDate
+    let engine: CalendarEngine
+    let showOwner: Bool
+    @ScaledMetric(relativeTo: .subheadline) private var timeWidth: CGFloat = 64
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(times.0).font(.subheadline.weight(.medium)).monospacedDigit()
+                if let end = times.1 { Text(end).font(.caption).foregroundStyle(.secondary).monospacedDigit() }
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .frame(width: min(timeWidth, 96), alignment: .trailing)
+            RoundedRectangle(cornerRadius: 2).fill(CalTint(occurrence.color)).frame(width: 4)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(occurrence.title).font(.body.weight(.medium)).lineLimit(2)
+                if !occurrence.event.fields.location.isEmpty {
+                    Text(occurrence.event.fields.location).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 6)
+            if occurrence.seriesID != nil {
+                Image(systemName: "repeat").font(.caption).foregroundStyle(.tertiary).accessibilityLabel("Repeats")
+            }
+            if showOwner, let who = AuthorBadge.author(of: occurrence, engine: engine) { who }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .calendarCard(cornerRadius: 20)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Start and end, or "All day" (and which day of several).
+    private var times: (String, String?) {
+        switch occurrence.when {
+        case .allDay(let s, let e):
+            let n = s.days(to: e)
+            return ("All day", n > 1 ? "\(s.days(to: day) + 1) of \(n)" : nil)
+        case .timed(let s, let e, _):
+            let f = CalFormat.styles(date: .none, time: .short)
+            return (f.string(from: s), s == e ? nil : f.string(from: e))
         }
     }
 }
@@ -309,12 +443,13 @@ struct DayCell: View {
     let inMonth: Bool
     let isToday: Bool
     let isSelected: Bool
-    let colors: [CalColor]
+    let chips: DayChip.Line
     var eventCount = 0
     @Environment(\.calendarAccent) private var accent
     /// The day's disc grows with Dynamic Type, up to what a seventh of a phone
     /// fits; past that the number shrinks to fit.
-    @ScaledMetric(relativeTo: .callout) private var disc: CGFloat = 32
+    @ScaledMetric(relativeTo: .callout) private var disc: CGFloat = 30
+    @ScaledMetric(relativeTo: .caption2) private var chipHeight: CGFloat = 14
 
     /// Selected today: the accent with black or white on it. Selected another
     /// day: an inverted disc (dark on light, light on dark).
@@ -338,13 +473,25 @@ struct DayCell: View {
                 .background {
                     if isSelected { Circle().fill(isToday ? AnyShapeStyle(.tint) : AnyShapeStyle(Color(uiColor: .label))) }
                 }
-            HStack(spacing: 3) {
-                ForEach(Array(colors.enumerated()), id: \.offset) { _, c in
-                    Circle().fill(CalTint(c)).frame(width: 5, height: 5)
+            // Two lines of chips, always reserved so every week row is the
+            // same height: two titles, or one and "+N".
+            VStack(spacing: 2) {
+                ForEach(Array(chips.shown.enumerated()), id: \.offset) { _, c in
+                    DayChip(chip: c, height: min(chipHeight, 18))
+                }
+                if chips.more > 0 {
+                    Text("+\(chips.more)")
+                        .font(.system(size: min(chipHeight, 18) * 0.7, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 3)
+                        .frame(height: min(chipHeight, 18))
                 }
             }
-            .frame(height: 5)
+            .frame(height: min(chipHeight, 18) * 2 + 2, alignment: .top)
+            .opacity(inMonth ? 1 : 0.45)
         }
+        .padding(.horizontal, 1.5)
         .frame(maxWidth: .infinity, minHeight: 44)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
@@ -364,6 +511,43 @@ extension DayCell {
         if events == 1 { parts.append(String(localized: "1 event")) }
         else if events > 1 { parts.append(String(localized: "\(events) events")) }
         return parts.joined(separator: ", ")
+    }
+}
+
+/// An event's title in a month cell, in its color (event, else label, else
+/// calendar): tinted capsule, colored text, one line.
+struct DayChip: View {
+    struct Item: Equatable {
+        let title: String
+        let color: CalColor
+    }
+    /// A cell's chips: at most two lines, the second given to "+N" when more.
+    struct Line: Equatable {
+        var shown: [Item] = []
+        var more = 0
+    }
+
+    let chip: Item
+    let height: CGFloat
+
+    var body: some View {
+        Text(chip.title)
+            .font(.system(size: height * 0.7, weight: .medium))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .foregroundStyle(CalTint(chip.color))
+            .padding(.horizontal, 3)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .frame(height: height)
+            .background(CalTint(chip.color).opacity(0.18), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+    }
+
+    /// Two titles, or one and "+N" (the day's occurrences come sorted: all-day
+    /// first, then by time).
+    static func chips(_ occ: [CalOccurrence]) -> Line {
+        let items = occ.map { Item(title: $0.title, color: $0.color) }
+        if items.count <= 2 { return Line(shown: items) }
+        return Line(shown: [items[0]], more: items.count - 1)
     }
 }
 
@@ -432,9 +616,8 @@ struct OccurrenceRow: View {
             if occurrence.seriesID != nil {
                 Image(systemName: "repeat").font(.caption).foregroundStyle(.tertiary).accessibilityLabel("Repeats")
             }
-            if showOwner {
-                CalAvatar(contact: engine.owner(of: occurrence.calendar), fallbackName: engine.displayName(occurrence.calendar),
-                          tint: occurrence.calendar.displayColor)
+            if showOwner, let who = AuthorBadge.author(of: occurrence, engine: engine) {
+                who
             }
         }
         .padding(.vertical, 2)
@@ -451,6 +634,102 @@ struct OccurrenceRow: View {
             if s == e { return f.string(from: s) }
             return "\(f.string(from: s)) – \(f.string(from: e))"
         }
+    }
+}
+
+/// Who put an event there: its author when that's someone other than the
+/// calendar's owner (a partner adding to your calendar), else the owner. Shown
+/// when more than one calendar is on screen, so a glance says whose it is;
+/// the detail's "Added by" appears exactly when the author isn't the owner.
+struct AuthorBadge: View {
+    let contact: CalContact?
+    let name: String
+    let tint: CalColor
+    let addedByOther: Bool
+    var size: CGFloat = 22
+
+    var body: some View {
+        CalAvatar(contact: contact, fallbackName: name, tint: tint, size: size)
+            .accessibilityHidden(false)
+            .accessibilityLabel(addedByOther ? "Added by \(name)" : name)
+    }
+
+    @MainActor
+    static func author(of o: CalOccurrence, engine: CalendarEngine, size: CGFloat = 22) -> AuthorBadge? {
+        let owner = o.calendar.ownerID
+        if o.author != owner {
+            let person = engine.people[o.author]
+            let theirs = engine.calendars.first { $0.ownerID == o.author }
+            let me = o.author == engine.config.currentUserID
+            return AuthorBadge(contact: person, name: me ? "My calendar" : (person?.name ?? theirs.map(engine.displayName) ?? "Someone"),
+                               tint: theirs?.displayColor ?? .gray, addedByOther: true, size: size)
+        }
+        return AuthorBadge(contact: engine.owner(of: o.calendar), name: engine.displayName(o.calendar),
+                           tint: o.calendar.displayColor, addedByOther: false, size: size)
+    }
+}
+
+/// One chip per calendar you can see, yours first: tap to show or hide it.
+/// The shared-calendar apps' signature: who's on screen, at a glance.
+struct PeopleBar: View {
+    let engine: CalendarEngine
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(engine.calendars) { c in
+                    PersonChip(calendar: c, name: name(c), contact: engine.owner(of: c)) {
+                        withAnimation(.snappy) { engine.setVisible(c, !c.visible) }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 2)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private func name(_ c: CalCalendar) -> String {
+        if c.isOwn { return "Me" }
+        let full = engine.owner(of: c)?.name ?? engine.displayName(c)
+        return full.split(separator: " ").first.map(String.init) ?? full
+    }
+}
+
+struct PersonChip: View {
+    let calendar: CalCalendar
+    let name: String
+    let contact: CalContact?
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 6) {
+                CalAvatar(contact: contact, fallbackName: calendar.isOwn ? "My calendar" : name,
+                          tint: calendar.displayColor, size: 22)
+                    .saturation(calendar.visible ? 1 : 0)
+                Text(name)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(calendar.visible ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                    .strikethrough(!calendar.visible, color: .secondary)
+            }
+            .padding(.leading, 4)
+            .padding(.trailing, 12)
+            .padding(.vertical, 4)
+            .background {
+                Capsule().fill(calendar.visible ? AnyShapeStyle(CalTint(calendar.displayColor).opacity(0.18))
+                                                : AnyShapeStyle(.quaternary))
+            }
+            .overlay {
+                Capsule().strokeBorder(calendar.visible ? AnyShapeStyle(CalTint(calendar.displayColor).opacity(0.6))
+                                                        : AnyShapeStyle(.clear), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(calendar.isOwn ? "My calendar" : "\(name)'s calendar")
+        .accessibilityValue(calendar.visible ? "Shown" : "Hidden")
+        .accessibilityHint("Shows or hides it")
+        .accessibilityAddTraits(calendar.visible ? .isSelected : [])
     }
 }
 
