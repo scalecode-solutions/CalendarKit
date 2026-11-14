@@ -131,6 +131,7 @@ struct EventEditorView: View {
 struct RepeatSection: View {
     @Binding var draft: CalEventDraft
     @Environment(\.calendarAccent) private var accent
+    @ScaledMetric(relativeTo: .footnote) private var chip: CGFloat = 32
 
     var body: some View {
         Section {
@@ -196,23 +197,26 @@ struct RepeatSection: View {
 
     private var ordinal: String { ["first", "second", "third", "fourth", "fifth"][(draft.firstDay.day - 1) / 7] }
 
+    /// The repeat days as chips, in the person's week order and language.
     private var weekdays: some View {
         HStack {
-            ForEach(1...7, id: \.self) { d in
+            ForEach(WeekdayChips.order(), id: \.self) { d in
                 let on = draft.customRule.weekdays.contains(d) || d == draft.firstDay.isoWeekday
                 Button {
                     guard d != draft.firstDay.isoWeekday else { return } // the start's day always repeats
                     if on { draft.customRule.weekdays.removeAll { $0 == d } } else { draft.customRule.weekdays.append(d) }
                 } label: {
-                    Text(["M", "T", "W", "T", "F", "S", "S"][d - 1])
+                    Text(WeekdayChips.letter(d))
                         .font(.footnote.weight(.semibold))
-                        .frame(width: 32, height: 32)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .frame(width: min(chip, 44), height: min(chip, 44))
                         .background(on ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary), in: Circle())
                         .foregroundStyle(on ? AnyShapeStyle(CalOnTint(accent)) : AnyShapeStyle(.primary))
                 }
                 .buttonStyle(.plain)
                 .frame(maxWidth: .infinity)
-                .accessibilityLabel(["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][d])
+                .accessibilityLabel(WeekdayChips.name(d))
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
@@ -254,4 +258,25 @@ struct ColorRow: View {
             .padding(.vertical, 4)
         }
     }
+}
+
+/// Weekday chips: ISO numbers (1 = Monday ... 7 = Sunday, what rules store),
+/// shown in the locale's week order with its letters and names.
+enum WeekdayChips {
+    /// ISO weekdays starting at the calendar's first weekday (1 = Sunday).
+    static func order(firstWeekday: Int = Calendar.current.firstWeekday) -> [Int] {
+        (0..<7).map { iso(gregorian: (firstWeekday - 1 + $0) % 7 + 1) }
+    }
+
+    static func letter(_ iso: Int, calendar: Calendar = .current) -> String {
+        calendar.veryShortStandaloneWeekdaySymbols[gregorian(iso: iso) - 1]
+    }
+
+    static func name(_ iso: Int, calendar: Calendar = .current) -> String {
+        calendar.standaloneWeekdaySymbols[gregorian(iso: iso) - 1]
+    }
+
+    /// Foundation numbers Sunday 1 ... Saturday 7; ISO numbers Monday 1 ... Sunday 7.
+    static func iso(gregorian g: Int) -> Int { g == 1 ? 7 : g - 1 }
+    static func gregorian(iso i: Int) -> Int { i == 7 ? 1 : i + 1 }
 }

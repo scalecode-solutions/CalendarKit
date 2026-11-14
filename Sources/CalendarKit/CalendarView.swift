@@ -95,6 +95,10 @@ public struct CalendarView: View {
             .buttonBorderShape(.circle)
             .accessibilityLabel(appearance.newEvent)
             .disabled(engine.writableCalendars.isEmpty)
+            // A fixed-size control: past this, VoiceOver's large content
+            // viewer shows it instead of the glyph outgrowing its circle.
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+            .accessibilityShowsLargeContentViewer()
         }
         .padding(.horizontal, 16)
     }
@@ -121,6 +125,9 @@ public struct CalendarView: View {
     private var monthHeader: some View {
         HStack {
             Text(monthTitle).font(.title2.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .accessibilityAddTraits(.isHeader)
             Spacer()
             if layout != MonthLayout(year: today.year, month: today.month, firstWeekday: firstWeekday) || selected != today {
                 Button("Today") {
@@ -139,6 +146,7 @@ public struct CalendarView: View {
                 .buttonBorderShape(.circle)
                 .accessibilityLabel("Next month")
         }
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .padding(.horizontal, 16)
         .padding(.top, 14)
     }
@@ -166,7 +174,8 @@ public struct CalendarView: View {
                 HStack(spacing: 0) {
                     ForEach(week, id: \.self) { day in
                         DayCell(day: day, inMonth: layout.contains(day), isToday: day == today,
-                                isSelected: day == selected, colors: dotColors(index[day] ?? []))
+                                isSelected: day == selected, colors: dotColors(index[day] ?? []),
+                                eventCount: index[day]?.count ?? 0)
                             .onTapGesture {
                                 selected = day
                                 if !layout.contains(day) { month = (day.year, day.month) }
@@ -308,7 +317,11 @@ struct DayCell: View {
     let isToday: Bool
     let isSelected: Bool
     let colors: [CalColor]
+    var eventCount = 0
     @Environment(\.calendarAccent) private var accent
+    /// The day's disc grows with Dynamic Type, up to what a seventh of a phone
+    /// fits; past that the number shrinks to fit.
+    @ScaledMetric(relativeTo: .callout) private var disc: CGFloat = 32
 
     /// Selected today: the accent with black or white on it. Selected another
     /// day: an inverted disc (dark on light, light on dark).
@@ -326,7 +339,9 @@ struct DayCell: View {
             Text("\(day.day)")
                 .font(.callout.weight(isToday || isSelected ? .semibold : .regular))
                 .foregroundStyle(numberStyle)
-                .frame(width: 32, height: 32)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .frame(width: min(disc, 44), height: min(disc, 44))
                 .background {
                     if isSelected { Circle().fill(isToday ? AnyShapeStyle(.tint) : AnyShapeStyle(Color(uiColor: .label))) }
                 }
@@ -340,8 +355,27 @@ struct DayCell: View {
         .frame(maxWidth: .infinity, minHeight: 44)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(day.description)\(colors.isEmpty ? "" : ", has events")")
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityLabel(DayCell.spoken(day, isToday: isToday, events: eventCount))
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+extension DayCell {
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.setLocalizedDateFormatFromTemplate("EEEEMMMMd")
+        return f
+    }()
+
+    /// What VoiceOver says for a day: "Today, Saturday, November 14, 2 events".
+    static func spoken(_ day: CalDate, isToday: Bool, events: Int) -> String {
+        var parts: [String] = []
+        if isToday { parts.append(String(localized: "Today")) }
+        parts.append(dayFormatter.string(from: day.utcMidnight))
+        if events == 1 { parts.append(String(localized: "1 event")) }
+        else if events > 1 { parts.append(String(localized: "\(events) events")) }
+        return parts.joined(separator: ", ")
     }
 }
 
