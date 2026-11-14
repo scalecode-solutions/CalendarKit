@@ -29,9 +29,29 @@ struct EventEditorView: View {
             isNew = false
         case .following(let o):
             let series = engine.event(o.seriesID ?? o.event.id)
-            _draft = State(initialValue: CalEventDraft(series?.fields ?? o.event.fields, calendarID: o.event.calendarID, occurrence: o.when))
+            var d = CalEventDraft(series?.fields ?? o.event.fields, calendarID: o.event.calendarID, occurrence: o.when)
+            // A counted series: the rest has what's left, not the whole count
+            // again (R3); the form shows what will be saved.
+            if let series, let left = Self.remaining(of: series, from: o) { d.ending = .after(left) }
+            _draft = State(initialValue: d)
             isNew = false
         }
+    }
+
+    /// How many occurrences of a counted series fall on or after `o`'s day.
+    static func remaining(of series: CalEvent, from o: CalOccurrence) -> Int? {
+        guard let rule = series.fields.recurrence, let total = rule.count, let original = o.originalStart else { return nil }
+        let first = series.fields.when.firstDay
+        let day: CalDate
+        switch original {
+        case .date(let d): day = d
+        case .instant(let t):
+            guard case .timed(_, _, let tz) = series.fields.when else { return nil }
+            day = CalDate(t, in: TimeZone(identifier: tz) ?? .gmt)
+        }
+        guard day > first else { return nil }
+        let before = CalRecurrenceExpander.dates(rule, first: first, through: day.adding(days: -1)).count
+        return max(1, total - before)
     }
 
     private var isOccurrence: Bool { if case .occurrence = request { return true }; return false }
