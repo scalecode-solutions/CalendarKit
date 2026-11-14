@@ -64,12 +64,10 @@ struct EventEditorView: View {
                 TextField("Location", text: $draft.location)
             }
             Section {
-                Toggle("All-day", isOn: $draft.allDay)
-                DatePicker("Starts", selection: $draft.start, displayedComponents: draft.allDay ? [.date] : [.date, .hourAndMinute])
-                    .onChange(of: draft.start) { old, new in
-                        // Keep the length when the start moves.
-                        draft.end = max(new, draft.end.addingTimeInterval(new.timeIntervalSince(old)))
-                    }
+                Toggle("All-day", isOn: Binding(get: { draft.allDay }, set: { draft.setAllDay($0) }))
+                // Moving the start keeps the length (only when the person moves it).
+                DatePicker("Starts", selection: Binding(get: { draft.start }, set: { draft.moveStart(to: $0) }),
+                           displayedComponents: draft.allDay ? [.date] : [.date, .hourAndMinute])
                 DatePicker("Ends", selection: $draft.end, in: draft.start..., displayedComponents: draft.allDay ? [.date] : [.date, .hourAndMinute])
                 if !draft.allDay && draft.timeZone != .current {
                     LabeledContent("Time zone", value: draft.timeZone.localizedName(for: .generic, locale: .current) ?? draft.timeZone.identifier)

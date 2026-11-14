@@ -212,6 +212,40 @@ public struct CalEventDraft: Equatable, Sendable {
 
     public var firstDay: CalDate { CalDate(start, in: timeZone) }
 
+    /// Move the start, keeping the length (the Starts picker).
+    public mutating func moveStart(to new: Date) {
+        let delta = new.timeIntervalSince(start)
+        start = new
+        end = max(new, end.addingTimeInterval(delta))
+    }
+
+    /// Switch between all-day and timed, keeping the days shown (R63, R64).
+    /// To timed: the next hour today, else 9:00, an hour long on a one-day
+    /// event, or to the same time on the last day. To all-day: the days the
+    /// times fall on (an end at midnight doesn't add a day). Reminders chosen
+    /// for the other kind would mean something else (minutes before a time vs
+    /// before the day), so they go back to the person's defaults.
+    public mutating func setAllDay(_ on: Bool, now: Date = Date()) {
+        guard on != allDay else { return }
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = timeZone
+        let first = CalDate(start, in: timeZone)
+        var last = CalDate(end, in: timeZone)
+        if on {
+            if end > start && OccurrenceBuilder.start(of: last, in: timeZone) == end { last = last.adding(days: -1) }
+            if last < first { last = first }
+            start = CalRecurrenceExpander.wallClock(first, hour: 0, minute: 0, second: 0, in: timeZone)
+            end = CalRecurrenceExpander.wallClock(last, hour: 0, minute: 0, second: 0, in: timeZone)
+        } else {
+            let hour = first == CalDate(now, in: timeZone) ? min(23, cal.component(.hour, from: now) + 1) : 9
+            start = CalRecurrenceExpander.wallClock(first, hour: hour, minute: 0, second: 0, in: timeZone)
+            end = CalRecurrenceExpander.wallClock(max(first, last), hour: hour, minute: 0, second: 0, in: timeZone)
+                .addingTimeInterval(3600)
+        }
+        allDay = on
+        alerts = nil
+    }
+
     /// The fields to save, or what's wrong (the server's own limits).
     public func fields() -> Result<CalEventFields, Problem> {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)

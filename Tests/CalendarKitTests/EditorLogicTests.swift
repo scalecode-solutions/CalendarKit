@@ -31,4 +31,55 @@ struct EditorLogicTests {
         guard let series = engine.event(s.id) else { Issue.record("no series"); return }
         #expect(EventEditorView.remaining(of: series, from: occ[2]) == nil)
     }
+
+    // R63/R64: the all-day toggle keeps the days shown and sensible times.
+    private let zone = TimeZone(identifier: "America/Chicago")!
+    private func at(_ d: CalDate, _ h: Int, _ m: Int = 0) -> Date {
+        CalRecurrenceExpander.wallClock(d, hour: h, minute: m, second: 0, in: zone)
+    }
+    private let earlier = CalRecurrenceExpander.wallClock(CalDate(2026, 11, 1), hour: 8, minute: 0, second: 0,
+                                                          in: TimeZone(identifier: "America/Chicago")!)
+
+    @Test func allDayOffGivesAnHourAtNine() {
+        var d = CalEventDraft(start: at(CalDate(2026, 11, 14), 0), end: at(CalDate(2026, 11, 14), 0), timeZone: zone)
+        d.allDay = true
+        d.title = "x"
+        d.alerts = [900]
+        d.setAllDay(false, now: earlier)
+        #expect(d.start == at(CalDate(2026, 11, 14), 9) && d.end == at(CalDate(2026, 11, 14), 10))
+        #expect(d.alerts == nil)
+        guard case .success(let f) = d.fields(), case .timed(let s, let e, _) = f.when else { Issue.record("fields"); return }
+        #expect(e.timeIntervalSince(s) == 3600)
+    }
+
+    @Test func multiDayAllDayOffKeepsItsDays() {
+        var d = CalEventDraft(start: at(CalDate(2026, 11, 14), 0), end: at(CalDate(2026, 11, 16), 0), timeZone: zone)
+        d.allDay = true
+        d.setAllDay(false, now: earlier)
+        #expect(d.start == at(CalDate(2026, 11, 14), 9) && d.end == at(CalDate(2026, 11, 16), 10))
+    }
+
+    @Test func todayGoesToTheNextHour() {
+        let now = at(CalDate(2026, 11, 14), 15, 20)
+        var d = CalEventDraft(start: at(CalDate(2026, 11, 14), 0), end: at(CalDate(2026, 11, 14), 0), timeZone: zone)
+        d.allDay = true
+        d.setAllDay(false, now: now)
+        #expect(d.start == at(CalDate(2026, 11, 14), 16))
+    }
+
+    @Test func allDayOnKeepsTheDaysAndDropsTimedReminders() {
+        var d = CalEventDraft(start: at(CalDate(2026, 11, 14), 22), end: at(CalDate(2026, 11, 15), 0), timeZone: zone)
+        d.title = "x"
+        d.alerts = [15]
+        d.setAllDay(true)
+        #expect(d.alerts == nil) // 15 minutes before a time would be 23:45 the night before
+        guard case .success(let f) = d.fields() else { Issue.record("fields"); return }
+        #expect(f.when == .allDay(start: CalDate(2026, 11, 14), end: CalDate(2026, 11, 15))) // midnight end adds no day
+    }
+
+    @Test func movingTheStartKeepsTheLength() {
+        var d = CalEventDraft(start: at(CalDate(2026, 11, 14), 9), end: at(CalDate(2026, 11, 14), 10, 30), timeZone: zone)
+        d.moveStart(to: at(CalDate(2026, 11, 14), 13))
+        #expect(d.end == at(CalDate(2026, 11, 14), 14, 30))
+    }
 }
