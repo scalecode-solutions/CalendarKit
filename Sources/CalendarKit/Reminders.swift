@@ -51,7 +51,7 @@ public enum ReminderPlanner {
     /// Anything set explicitly wins, including none.
     public static func effective(_ o: CalOccurrence, alerts: [UUID: [Int]], me: UUID?, defaults: CalAlertDefaults) -> [Int] {
         if let m = alerts[o.event.id] ?? o.seriesID.flatMap({ alerts[$0] }) { return m }
-        guard let me, o.event.createdBy != me else { return [] }
+        guard let me, o.author != me else { return [] } // judged by the series' maker (Frond)
         return o.isAllDay ? defaults.allDay : defaults.timed
     }
 

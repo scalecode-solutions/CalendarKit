@@ -17,6 +17,9 @@ public struct CalOccurrence: Identifiable, Equatable, Sendable {
     public let label: CalLabel?
     /// event color → label color → the calendar's display color.
     public let color: CalColor
+    /// Who made it: the series' creator for an occurrence of a series (even a
+    /// changed one), else the event's.
+    public let author: UUID
 
     public var title: String { event.fields.title }
     public var isAllDay: Bool { when.isAllDay }
@@ -59,7 +62,7 @@ enum OccurrenceBuilder {
             case nil: id = base
             }
             return CalOccurrence(id: id, event: shown, seriesID: series?.id, originalStart: original, when: when,
-                                 calendar: cal, label: label, color: color)
+                                 calendar: cal, label: label, color: color, author: (series ?? shown).createdBy)
         }
 
         for e in events where !e.deleted && e.masterID == nil {
