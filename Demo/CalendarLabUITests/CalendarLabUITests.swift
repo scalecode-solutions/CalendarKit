@@ -129,11 +129,10 @@ final class CalendarLabUITests: XCTestCase {
         title.tap()
         title.typeText("UI test standup")
         app.navigationBars["New Event"].tap() // put the keyboard away
-        // A menu picker in a form reads as "Repeat, Never".
-        reveal(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Repeat'")).firstMatch).tap()
-        let daily = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Every day'")).firstMatch
-        XCTAssert(daily.waitForExistence(timeout: 3))
-        daily.tap()
+        // Repeat is a segmented control: one tap from Never to Daily.
+        let daily = app.segmentedControls["Repeat"].buttons["Daily"]
+        reveal(daily).tap()
+        XCTAssert(app.staticTexts["Every day"].waitForExistence(timeout: 3)) // the summary under it
         shot("7-repeat")
         app.navigationBars["New Event"].buttons["Add"].tap()
         let row = app.buttons.containing(NSPredicate(format: "label CONTAINS 'UI test standup'")).firstMatch
@@ -143,6 +142,41 @@ final class CalendarLabUITests: XCTestCase {
         reveal(app.buttons["Delete Event"]).tap()
         XCTAssert(app.buttons["Delete All Future Events"].waitForExistence(timeout: 3))
         shot("8-delete-choice")
+        app.buttons["Delete All Future Events"].tap()
+        XCTAssert(row.waitForNonExistence(timeout: 5))
+    }
+
+    /// The editor and the detail, screen by screen (MVCALE-7): the repeat
+    /// picker, the colour grid, the reminders row and its list, the detail's
+    /// hero. Run it once in light and once in dark for the screenshots.
+    func testEditorAndDetailTour() throws {
+        XCTAssert(app.buttons["New Event"].waitForExistence(timeout: 15))
+        app.buttons["New Event"].tap()
+        let title = app.textFields["Title"]
+        XCTAssert(title.waitForExistence(timeout: 5))
+        title.tap()
+        title.typeText("UI test physio")
+        app.textFields["Location"].tap()
+        app.textFields["Location"].typeText("Riverside Clinic")
+        app.navigationBars["New Event"].tap() // put the keyboard away
+        reveal(app.segmentedControls["Repeat"].buttons["Weekly"]).tap()
+        shot("e1-editor-repeat")
+        reveal(app.buttons["Reminders"])
+        shot("e2-editor-color-reminders")
+        app.buttons["Reminders"].tap()
+        XCTAssert(app.navigationBars["Reminders"].waitForExistence(timeout: 3))
+        shot("e3-reminders-list")
+        app.navigationBars["Reminders"].buttons.firstMatch.tap() // back
+        app.navigationBars["New Event"].buttons["Add"].tap()
+
+        let row = app.buttons.containing(NSPredicate(format: "label CONTAINS 'UI test physio'")).firstMatch
+        XCTAssert(row.waitForExistence(timeout: 5))
+        row.tap()
+        XCTAssert(app.navigationBars["Event"].waitForExistence(timeout: 5))
+        XCTAssert(app.staticTexts["Riverside Clinic"].exists)
+        shot("e4-detail")
+        reveal(app.buttons["Delete Event"]).tap()
+        XCTAssert(app.buttons["Delete All Future Events"].waitForExistence(timeout: 3))
         app.buttons["Delete All Future Events"].tap()
         XCTAssert(row.waitForNonExistence(timeout: 5))
     }
