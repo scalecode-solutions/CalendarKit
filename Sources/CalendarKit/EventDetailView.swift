@@ -54,7 +54,7 @@ struct EventDetailView: View {
             }
             Section("Your reminders") {
                 AlertsPicker(allDay: occurrence.isAllDay,
-                             selection: Binding(get: { engine.alerts[event.id] ?? series.flatMap { engine.alerts[$0.id] } ?? [] },
+                             selection: Binding(get: { engine.effectiveAlerts(for: occurrence) },
                                                 set: { engine.setAlerts(for: series ?? event, minutesBefore: $0) }))
             }
             if canWrite {

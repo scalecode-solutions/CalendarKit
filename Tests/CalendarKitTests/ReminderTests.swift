@@ -83,6 +83,24 @@ struct ReminderTests {
         #expect(ReminderPlanner.plan(occurrences: occ([daily]), alerts: [daily.id: [0]], now: at(2026, 11, 1, 0), zone: chicago, budget: 0).isEmpty)
     }
 
+    /// R20 (Travis: "use my defaults"): events someone else added remind with
+    /// the person's defaults; their own don't (they got defaults when made),
+    /// and anything set explicitly — including none — wins.
+    @Test func partnerEventsUseMyDefaults() {
+        let me = UUID(), partner = UUID()
+        func ev(_ title: String, by who: UUID) -> CalEvent {
+            var e = event(title, .timed(start: at(2026, 11, 18, 15), end: at(2026, 11, 18, 16), timeZone: "America/Chicago"), calendar: c.id)
+            e.createdBy = who
+            return e
+        }
+        let theirs = ev("Theirs", by: partner), mine = ev("Mine", by: me), muted = ev("Muted", by: partner)
+        let d = CalAlertDefaults(timed: [30], allDay: [900])
+        let plan = ReminderPlanner.plan(occurrences: occ([theirs, mine, muted]), alerts: [muted.id: []],
+                                        now: at(2026, 11, 1, 0), zone: chicago, me: me, defaults: d)
+        #expect(plan.map(\.title) == ["Theirs"])
+        #expect(plan.first?.fireAt == at(2026, 11, 18, 14, 30))
+    }
+
     @Test func schedulerDiffsAndLeavesTheHostsAlone() async {
         let center = FakeCenter()
         center.hostIDs.withLock { $0 = ["host.message.1", "host.other"] }

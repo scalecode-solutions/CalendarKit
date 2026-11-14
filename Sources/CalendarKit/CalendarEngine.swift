@@ -98,7 +98,8 @@ public final class CalendarEngine {
         let today = CalDate(now, in: zone)
         let plan = ReminderPlanner.plan(occurrences: occurrences(from: today.adding(days: -1),
                                                                  through: today.adding(days: reminderHorizonDays), zone: zone),
-                                        alerts: alerts, now: now, zone: zone, budget: config.reminderBudget)
+                                        alerts: alerts, now: now, zone: zone, budget: config.reminderBudget,
+                                        me: config.currentUserID, defaults: alertDefaults)
         log.debug("reminders: planning \(plan.count, privacy: .public)")
         let (added, removed) = await reminders.apply(plan)
         log.debug("reminders: +\(added, privacy: .public) -\(removed, privacy: .public)")
@@ -218,6 +219,13 @@ public final class CalendarEngine {
     public func event(_ id: UUID) -> CalEvent? { store?.event(id) }
 
     public func calendar(_ id: UUID) -> CalCalendar? { calendars.first { $0.id == id } }
+
+    /// The reminders in effect for an occurrence (what the planner schedules
+    /// and what a detail view should show): explicit ones, else the person's
+    /// defaults for events someone else added.
+    public func effectiveAlerts(for o: CalOccurrence) -> [Int] {
+        ReminderPlanner.effective(o, alerts: alerts, me: config.currentUserID, defaults: alertDefaults)
+    }
 
     public func labels(of calendarID: UUID) -> [CalLabel] { labels.filter { $0.calendarID == calendarID } }
 

@@ -24,10 +24,12 @@ public enum ReminderPlanner {
     public static let prefix = "calendarkit."
 
     public static func plan(occurrences: [CalOccurrence], alerts: [UUID: [Int]], now: Date,
-                            zone: TimeZone, budget: Int = 32) -> [CalReminder] {
+                            zone: TimeZone, budget: Int = 32,
+                            me: UUID? = nil, defaults: CalAlertDefaults = CalAlertDefaults()) -> [CalReminder] {
         var out: [CalReminder] = []
         for o in occurrences {
-            guard let minutes = alerts[o.event.id] ?? o.seriesID.flatMap({ alerts[$0] }), !minutes.isEmpty else { continue }
+            let minutes = effective(o, alerts: alerts, me: me, defaults: defaults)
+            guard !minutes.isEmpty else { continue }
             let start: Date
             switch o.when {
             case .allDay(let s, _): start = CalRecurrenceExpander.wallClock(s, hour: 0, minute: 0, second: 0, in: zone)
@@ -41,6 +43,16 @@ public enum ReminderPlanner {
             }
         }
         return Array(out.sorted { ($0.fireAt, $0.id) < ($1.fireAt, $1.id) }.prefix(max(0, budget)))
+    }
+
+    /// The person's reminders for an occurrence: their own for the event, else
+    /// for its series; with neither, their defaults if someone else added it
+    /// (Travis's call, R20: a partner's events remind you like your own do).
+    /// Anything set explicitly wins, including none.
+    public static func effective(_ o: CalOccurrence, alerts: [UUID: [Int]], me: UUID?, defaults: CalAlertDefaults) -> [Int] {
+        if let m = alerts[o.event.id] ?? o.seriesID.flatMap({ alerts[$0] }) { return m }
+        guard let me, o.event.createdBy != me else { return [] }
+        return o.isAllDay ? defaults.allDay : defaults.timed
     }
 
     static func body(_ o: CalOccurrence, zone: TimeZone) -> String {
