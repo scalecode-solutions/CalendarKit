@@ -45,11 +45,12 @@ struct AccentTextTests {
         return 0.2126 * lin(c.0) + 0.7152 * lin(c.1) + 0.0722 * lin(c.2)
     }
 
-    /// Yellow as text in light mode ("Today", the chevrons, today's number)
-    /// clears 4.5:1 on the card.
-    @Test func lightYellowReadsAsText() {
+    /// Every accent as text in light mode ("Today", the chevrons, today's
+    /// number) clears 4.5:1 on the card.
+    @Test(arguments: CalColor.allCases)
+    func lightAccentReadsAsText(color: CalColor) {
         let card = Self.luminance(Self.warmCard)
-        let ratio = (card + 0.05) / (CalColor.yellow.luminance(dark: false) + 0.05)
+        let ratio = (card + 0.05) / (color.luminance(dark: false) + 0.05)
         #expect(ratio >= 4.5, "\(ratio)")
     }
 }

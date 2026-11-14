@@ -1,8 +1,9 @@
 import SwiftUI
 
 public extension CalColor {
-    /// The color for this scheme: a little deeper in light (contrast on white),
-    /// a little brighter in dark. `.none` draws as the kit's default, indigo,
+    /// The color for this scheme. Light variants are deep enough to read as text
+    /// on the light card (at least 4.5:1, see AccentTextTests); dark ones are
+    /// a little brighter. `.none` draws as the kit's default, indigo,
     /// everywhere (events, dots, the backdrop, the accent).
     func color(dark: Bool) -> Color {
         let (l, d) = rgb
@@ -44,20 +45,20 @@ public extension CalColor {
 
     private var rgb: (light: (Int, Int, Int), dark: (Int, Int, Int)) {
         switch self {
-        case .red:    ((215, 50, 50), (255, 105, 100))
-        case .orange: ((225, 110, 0), (255, 160, 70))
-        case .yellow: ((145, 105, 0), (250, 210, 60)) // light: deep amber, so yellow as text clears 4.5:1 on the card
-        case .green:  ((40, 150, 60), (95, 210, 110))
-        case .mint:   ((0, 160, 120), (90, 220, 180))
-        case .teal:   ((0, 140, 140), (50, 200, 190))
-        case .cyan:   ((0, 160, 200), (60, 210, 245))
-        case .sky:    ((40, 140, 230), (100, 190, 255))
+        case .red:    ((212, 49, 49), (255, 105, 100))
+        case .orange: ((179, 87, 0), (255, 160, 70))
+        case .yellow: ((145, 105, 0), (250, 210, 60))
+        case .green:  ((35, 130, 52), (95, 210, 110))
+        case .mint:   ((0, 129, 97), (90, 220, 180))
+        case .teal:   ((0, 126, 126), (50, 200, 190))
+        case .cyan:   ((0, 123, 154), (60, 210, 245))
+        case .sky:    ((33, 116, 191), (100, 190, 255))
         case .blue: ((30, 90, 220), (90, 140, 255))
         case .none, .indigo: ((80, 70, 200), (130, 120, 255))
         case .purple: ((140, 60, 200), (190, 120, 245))
-        case .pink:   ((215, 60, 140), (255, 120, 185))
+        case .pink:   ((199, 55, 130), (255, 120, 185))
         case .brown:  ((140, 95, 60), (200, 150, 110))
-        case .gray:   ((110, 115, 125), (165, 170, 180))
+        case .gray:   ((108, 113, 123), (165, 170, 180))
         }
     }
 }
