@@ -838,3 +838,26 @@ struct FollowingCountTests {
         #expect(engine.occurrences(from: nov.0, through: nov.1).map(\.title) == ["Gym", "Gym", "Gym (last time)"])
     }
 }
+
+/// R19: reminders follow a split to the new series.
+@MainActor
+@Suite("Engine: reminders across a split", .serialized)
+struct SplitReminderTests {
+    @Test func theNewSeriesKeepsTheSeriesReminders() async {
+        let (engine, server, own) = makeEngine()
+        await engine.refresh()
+        let s = engine.addEvent(to: own, allDay("Class", 2026, 11, 2, repeating: CalRecurrence(.weekly)), alerts: [900])
+        await engine.refresh()
+        let third = engine.occurrences(from: nov.0, through: nov.1).filter { $0.seriesID == s.id }[2]
+        var f = third.event.fields
+        f.title = "Class (new room)"
+        f.when = third.when
+        engine.updateFollowing(third, f)
+        await engine.refresh()
+        let newID = engine.occurrences(from: nov.0, through: nov.1).last!.seriesID!
+        #expect(newID != s.id)
+        #expect(engine.alerts[newID] == [900])
+        #expect(server.get { $0.alerts[newID]?.minutesBefore } == [900])
+        #expect(engine.notices.isEmpty)
+    }
+}

@@ -651,6 +651,11 @@ public final class CalendarEngine {
         store.put(old, pending: true)
         store.put(newSeries, pending: true)
         commit(.split(masterID: series.id, baseRev: series.rev, at: original, newSeries: newSeries, discardNew: false))
+        // The person's reminders for the series go on with it (R19): queued
+        // after the split, so the new series exists when they land.
+        if let minutes = store.alerts()[series.id], !minutes.isEmpty {
+            setAlerts(for: newSeries, minutesBefore: minutes)
+        }
     }
 
     /// Delete this and every later occurrence (earlier ones, and their
