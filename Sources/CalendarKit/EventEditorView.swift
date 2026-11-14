@@ -97,6 +97,10 @@ struct EventEditorView: View {
                 Section { Text(problem).foregroundStyle(.red) }
             }
         }
+        // Show times in the event's own zone, the zone the label names and
+        // the one all-day days are derived in (R35). New events use the
+        // device's zone, so nothing changes for them.
+        .environment(\.timeZone, draft.timeZone)
         .calendarBackdrop(engine)
         .navigationTitle(isNew ? "New Event" : "Edit Event")
         .navigationBarTitleDisplayMode(.inline)
