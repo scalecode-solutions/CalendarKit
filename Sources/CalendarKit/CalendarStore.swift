@@ -129,6 +129,9 @@ final class PendingWriteRecord {
     var seq: Int64
     var payload: Data      // PendingWrite
     var attempts: Int
+    /// Internal server failures only (being offline doesn't count toward
+    /// giving up). Defaulted so existing (Lab) stores migrate automatically.
+    var serverFailures: Int = 0
     var createdAt: Date
 
     init(id: UUID, seq: Int64, payload: Data) {
@@ -402,6 +405,16 @@ final class CalendarStore {
 
     func dropPending(_ id: UUID) {
         try? context.delete(model: PendingWriteRecord.self, where: #Predicate { $0.id == id })
+    }
+
+    func serverFailures(_ id: UUID) -> Int {
+        (try? context.fetch(FetchDescriptor<PendingWriteRecord>(predicate: #Predicate { $0.id == id })).first?.serverFailures) ?? 0
+    }
+
+    func bumpServerFailures(_ id: UUID) {
+        if let r = try? context.fetch(FetchDescriptor<PendingWriteRecord>(predicate: #Predicate { $0.id == id })).first {
+            r.serverFailures += 1
+        }
     }
 
     func bumpAttempts(_ id: UUID) {

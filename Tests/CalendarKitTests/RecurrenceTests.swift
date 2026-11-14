@@ -106,3 +106,22 @@ struct ExpanderTests {
         #expect(CalDate(2026, 3, 1).days(to: CalDate(2026, 3, 31)) == 30)
     }
 }
+
+import Connect
+
+/// R61/R39: what each server failure means to the queue.
+@Suite("Error mapping")
+struct ErrorMappingTests {
+    @Test func aRateLimitIsSlowDownByItsHeaderNotItsWords() {
+        let rate = ConnectError(code: .resourceExhausted, message: "anything", metadata: ["Retry-After": ["10"]])
+        let cap = ConnectError(code: .resourceExhausted, message: "slow down")
+        #expect(ConnectCalendarTransport.map(rate) == .slowDown)
+        #expect(ConnectCalendarTransport.map(cap) == .limit)
+    }
+
+    @Test func serverFailuresAreBoundedButOfflineIsNot() {
+        #expect(ConnectCalendarTransport.map(ConnectError(code: .internalError, message: "x")) == .serverFailed("x"))
+        #expect(ConnectCalendarTransport.map(ConnectError(code: .unavailable, message: "x")) == .unavailable("x"))
+        #expect(CalTransportError.serverFailed("x").isRetryable)
+    }
+}

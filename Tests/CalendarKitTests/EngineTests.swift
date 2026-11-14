@@ -27,6 +27,9 @@ final class FakeServer: CalendarTransport, Sendable {
         var purgedRev: [UUID: Int64] = [:]
         /// Apply the next write, then lose its answer (a dropped connection).
         var loseNextAnswer = false
+        /// Fail every write with this until cleared (a broken server).
+        var failAllWrites: CalTransportError?
+        var failedWrites = 0
     }
 
     /// The answer to a write that was applied: lost if loseNextAnswer is set.
@@ -58,6 +61,7 @@ final class FakeServer: CalendarTransport, Sendable {
 
     private func gate(_ s: inout State, _ name: String) throws {
         if s.offline { throw CalTransportError.unavailable("offline") }
+        if let e = s.failAllWrites { s.failedWrites += 1; throw e }
         if let e = s.failNextWrite { s.failNextWrite = nil; throw e }
         s.writes.append(name)
     }
@@ -893,5 +897,53 @@ struct LabelDeletedElsewhereTests {
         #expect(engine.event(e.id)?.fields.labelID == nil)
         #expect(engine.labels.isEmpty)
         #expect(engine.occurrences(from: nov.0, through: nov.1).first?.color != .orange)
+    }
+}
+
+/// R21/R39/R61: retry policy.
+@MainActor
+@Suite("Engine: retry policy", .serialized)
+struct RetryPolicyTests {
+    @Test func aWriteTheServerKeepsFailingOnGivesUpAndUnblocksTheQueue() async {
+        let (engine, server, own) = makeEngine()
+        await engine.refresh()
+        server.set { $0.failAllWrites = .serverFailed("internal error") }
+        let stuck = engine.addEvent(to: own, allDay("stuck", 2026, 11, 3))
+        for _ in 0..<20 where engine.notices.isEmpty { await engine.refresh() }
+        // Refused after exactly the allowed number of server failures, not before.
+        #expect(server.get { $0.failedWrites } == CalendarEngine.maxServerFailures)
+        #expect(engine.notices.count == 1)
+        #expect(engine.notices.first?.message.contains("kept failing") == true)
+        #expect(engine.event(stuck.id) == nil && engine.pendingCount == 0)
+        // The queue moves on.
+        server.set { $0.failAllWrites = nil }
+        engine.addEvent(to: own, allDay("next", 2026, 11, 4))
+        await engine.refresh()
+        #expect(server.get { $0.events.values.contains { $0.fields.title == "next" } })
+    }
+
+    @Test func timeSpentOfflineDoesntCountTowardGivingUp() async {
+        let (engine, server, own) = makeEngine()
+        await engine.refresh()
+        server.set { $0.offline = true }
+        engine.addEvent(to: own, allDay("long trip", 2026, 11, 3))
+        for _ in 0..<12 { await engine.refresh() }
+        server.set { $0.offline = false; $0.failNextWrite = .serverFailed("hiccup") }
+        await engine.refresh() // one server failure after a dozen offline tries
+        #expect(engine.notices.isEmpty, "gave up on the first server failure")
+        await engine.refresh()
+        #expect(engine.pendingCount == 0)
+    }
+
+    @Test func beingOfflineNeverGivesUp() async {
+        let (engine, server, own) = makeEngine()
+        await engine.refresh()
+        server.set { $0.offline = true }
+        engine.addEvent(to: own, allDay("later", 2026, 11, 3))
+        for _ in 0..<(CalendarEngine.maxServerFailures * 3) { await engine.refresh() }
+        #expect(engine.pendingCount == 1 && engine.notices.isEmpty)
+        server.set { $0.offline = false }
+        await engine.refresh()
+        #expect(engine.pendingCount == 0)
     }
 }

@@ -20,15 +20,18 @@ public enum CalTransportError: Error, Sendable, Equatable {
     case limit
     /// Too many writes: try again shortly.
     case slowDown
-    /// The server couldn't be reached or failed: try again later.
+    /// The server couldn't be reached: try again later (as long as it takes).
     case unavailable(String)
+    /// The server answered with an internal failure: worth a few more tries,
+    /// not forever (one write that always fails mustn't block the queue).
+    case serverFailed(String)
     /// The server answered something this kit can't read.
     case badResponse(String)
 
     /// Worth trying again later unchanged (an offline write stays queued).
     public var isRetryable: Bool {
         switch self {
-        case .unavailable, .slowDown, .notAuthenticated: return true
+        case .unavailable, .serverFailed, .slowDown, .notAuthenticated: return true
         default: return false
         }
     }
@@ -109,8 +112,12 @@ public struct ConnectCalendarTransport: CalendarTransport {
             return .conflict(current: current)
         case .invalidArgument: return .invalid(msg)
         case .alreadyExists: return .exists(msg)
-        case .resourceExhausted: return msg == "slow down" ? .slowDown : .limit
-        case .unavailable, .deadlineExceeded, .internalError, .unknown, .aborted, .canceled:
+        case .resourceExhausted:
+            // A rate limit says when to come back; a cap reached doesn't (R61).
+            return e.metadata.keys.contains { $0.lowercased() == "retry-after" } ? .slowDown : .limit
+        case .internalError, .unknown:
+            return .serverFailed(msg.isEmpty ? "\(e.code)" : msg)
+        case .unavailable, .deadlineExceeded, .aborted, .canceled:
             return .unavailable(msg.isEmpty ? "\(e.code)" : msg)
         default: return .badResponse("\(e.code): \(msg)")
         }

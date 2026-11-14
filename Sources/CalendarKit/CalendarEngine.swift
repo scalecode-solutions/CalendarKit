@@ -333,9 +333,10 @@ public final class CalendarEngine {
                 inFlight = nil
                 guard gen == generation else { return }
                 store.dropPending(pid)
-            } catch let e as CalTransportError where e.isRetryable {
+            } catch let e as CalTransportError where e.isRetryable && !gaveUp(e, pid: pid, store: store) {
                 inFlight = nil
                 store.bumpAttempts(pid)
+                if case .serverFailed = e { store.bumpServerFailures(pid) }
                 store.save()
                 lastError = Self.describe(e)
                 break // keep the order: everything after waits too
@@ -349,6 +350,16 @@ public final class CalendarEngine {
             store.save()
             publish()
         }
+    }
+
+    /// A write the server keeps failing on (an internal error, not being
+    /// offline) stops being retried after a few tries and is refused with a
+    /// notice, so it can't hold up everything queued behind it (R21/R39).
+    static let maxServerFailures = 5
+
+    private func gaveUp(_ e: CalTransportError, pid: UUID, store: CalendarStore) -> Bool {
+        guard case .serverFailed = e else { return false }
+        return store.serverFailures(pid) + 1 >= Self.maxServerFailures
     }
 
     /// What the server answered for an event, applied: later queued writes
@@ -467,6 +478,8 @@ public final class CalendarEngine {
             message = "\(what.prefix(1).uppercased() + what.dropFirst()) couldn't be saved: \(m)."
         case .limit?:
             message = "That calendar is full, so \(what) wasn't saved."
+        case .serverFailed?:
+            message = "The calendar server kept failing, so \(what) wasn't saved."
         default:
             message = "\(what.prefix(1).uppercased() + what.dropFirst()) couldn't be saved."
         }
@@ -795,6 +808,7 @@ public final class CalendarEngine {
         switch e {
         case .notAuthenticated: return "Couldn't verify — try again"
         case .unavailable: return "Can't reach the calendar right now"
+        case .serverFailed: return "The calendar server is having trouble"
         case .slowDown: return "Too many changes at once — trying again shortly"
         default: return "Couldn't sync"
         }
