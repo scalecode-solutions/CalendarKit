@@ -77,7 +77,7 @@ final class CalendarLabUITests: XCTestCase {
         app.navigationBars["New Event"].buttons["Add"].tap()
 
         // It's in today's list at once (before the server answers).
-        let row = app.buttons.containing(NSPredicate(format: "label CONTAINS 'UI test lunch'")).firstMatch
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS 'UI test lunch'")).firstMatch
         XCTAssert(row.waitForExistence(timeout: 5))
         shot("3-added")
 
@@ -118,7 +118,7 @@ final class CalendarLabUITests: XCTestCase {
         app.navigationBars["New Event"].buttons["Add"].tap()
         app.buttons["Agenda"].tap()
         XCTAssert(app.staticTexts["Today"].waitForExistence(timeout: 5))
-        let row = app.buttons.containing(NSPredicate(format: "label CONTAINS 'UI test agenda item'")).firstMatch
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS 'UI test agenda item'")).firstMatch
         XCTAssert(row.waitForExistence(timeout: 5))
         shot("10-agenda")
         // Relaunch: still on the agenda.
@@ -160,7 +160,7 @@ final class CalendarLabUITests: XCTestCase {
         XCTAssert(app.staticTexts["Every day"].waitForExistence(timeout: 3)) // the summary under it
         shot("7-repeat")
         app.navigationBars["New Event"].buttons["Add"].tap()
-        let row = app.buttons.containing(NSPredicate(format: "label CONTAINS 'UI test standup'")).firstMatch
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS 'UI test standup'")).firstMatch
         XCTAssert(row.waitForExistence(timeout: 5))
         row.tap()
         XCTAssert(app.navigationBars["Event"].waitForExistence(timeout: 5))
@@ -194,7 +194,7 @@ final class CalendarLabUITests: XCTestCase {
         app.navigationBars["Reminders"].buttons.firstMatch.tap() // back
         app.navigationBars["New Event"].buttons["Add"].tap()
 
-        let row = app.buttons.containing(NSPredicate(format: "label CONTAINS 'UI test physio'")).firstMatch
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS 'UI test physio'")).firstMatch
         XCTAssert(row.waitForExistence(timeout: 5))
         row.tap()
         XCTAssert(app.navigationBars["Event"].waitForExistence(timeout: 5))
