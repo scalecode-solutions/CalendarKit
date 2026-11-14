@@ -26,7 +26,8 @@ public enum ReminderPlanner {
     public static func plan(occurrences: [CalOccurrence], alerts: [UUID: [Int]], now: Date,
                             zone: TimeZone, budget: Int = 32,
                             me: UUID? = nil, defaults: CalAlertDefaults = CalAlertDefaults()) -> [CalReminder] {
-        var out: [CalReminder] = []
+        // Candidates first, bodies only for the ones that make the budget (R49).
+        var due: [(fire: Date, id: String, o: CalOccurrence)] = []
         for o in occurrences {
             let minutes = effective(o, alerts: alerts, me: me, defaults: defaults)
             guard !minutes.isEmpty else { continue }
@@ -38,11 +39,12 @@ public enum ReminderPlanner {
             for m in Set(minutes) {
                 let fire = start.addingTimeInterval(-Double(m) * 60)
                 guard fire > now else { continue }
-                out.append(CalReminder(id: "\(prefix)\(o.id).\(m)", fireAt: fire, title: o.title,
-                                       body: body(o, zone: zone)))
+                due.append((fire, "\(prefix)\(o.id).\(m)", o))
             }
         }
-        return Array(out.sorted { ($0.fireAt, $0.id) < ($1.fireAt, $1.id) }.prefix(max(0, budget)))
+        return due.sorted { ($0.fire, $0.id) < ($1.fire, $1.id) }.prefix(max(0, budget)).map {
+            CalReminder(id: $0.id, fireAt: $0.fire, title: $0.o.title, body: body($0.o, zone: zone))
+        }
     }
 
     /// The person's reminders for an occurrence: their own for the event, else
@@ -56,19 +58,13 @@ public enum ReminderPlanner {
     }
 
     static func body(_ o: CalOccurrence, zone: TimeZone) -> String {
-        let f = DateFormatter()
-        f.timeZone = zone
-        f.locale = .current
         switch o.when {
         case .allDay(let s, let e):
-            f.dateStyle = .full
-            f.timeStyle = .none
+            let f = CalFormat.styles(date: .full, time: .none, zone: zone)
             let first = f.string(from: CalRecurrenceExpander.wallClock(s, hour: 12, minute: 0, second: 0, in: zone))
             return s.days(to: e) > 1 ? "From \(first), all day" : "\(first), all day"
         case .timed(let s, _, _):
-            f.dateStyle = .full
-            f.timeStyle = .short
-            let at = f.string(from: s)
+            let at = CalFormat.styles(date: .full, time: .short, zone: zone).string(from: s)
             return o.event.fields.location.isEmpty ? at : "\(at) · \(o.event.fields.location)"
         }
     }

@@ -89,20 +89,15 @@ struct EventDetailView: View {
 
 enum EventText {
     static func when(_ w: CalWhen) -> String {
-        let f = DateFormatter()
         switch w {
         case .allDay(let s, let e):
-            f.timeZone = TimeZone(identifier: "UTC")
-            f.dateStyle = .full
-            f.timeStyle = .none
+            let f = CalFormat.styles(date: .full, time: .none, zone: CalFormat.utc)
             let first = f.string(from: s.utcMidnight)
             if s.days(to: e) == 1 { return "\(first), all day" }
             return "\(first) – \(f.string(from: e.adding(days: -1).utcMidnight)), all day"
         case .timed(let s, let e, let tz):
-            f.dateStyle = .full
-            f.timeStyle = .short
-            let t = DateFormatter()
-            t.timeStyle = .short
+            let f = CalFormat.styles(date: .full, time: .short)
+            let t = CalFormat.styles(date: .none, time: .short)
             let sameDay = Calendar.current.isDate(s, inSameDayAs: e)
             var out = s == e ? f.string(from: s) : sameDay ? "\(f.string(from: s)) – \(t.string(from: e))" : "\(f.string(from: s)) – \(f.string(from: e))"
             if tz != TimeZone.current.identifier, let zone = TimeZone(identifier: tz) {

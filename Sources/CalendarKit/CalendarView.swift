@@ -152,10 +152,7 @@ public struct CalendarView: View {
     }
 
     private var monthTitle: String {
-        let f = DateFormatter()
-        f.dateFormat = DateFormatter.dateFormat(fromTemplate: "MMMMyyyy", options: 0, locale: .current)
-        f.timeZone = TimeZone(identifier: "UTC")
-        return f.string(from: CalDate(month.year, month.month, 1).utcMidnight)
+        CalFormat.template("MMMMyyyy").string(from: CalDate(month.year, month.month, 1).utcMidnight)
     }
 
     private var weekdayHeader: some View {
@@ -276,11 +273,7 @@ struct AgendaList: View {
         case 0: return "Today"
         case 1: return "Tomorrow"
         default:
-            let f = DateFormatter()
-            f.timeZone = TimeZone(identifier: "UTC")
-            let sameYear = d.year == today.year
-            f.dateFormat = DateFormatter.dateFormat(fromTemplate: sameYear ? "EEEEMMMMd" : "EEEEMMMMdyyyy", options: 0, locale: .current)
-            return f.string(from: d.utcMidnight)
+            return CalFormat.template(d.year == today.year ? "EEEEMMMMd" : "EEEEMMMMdyyyy").string(from: d.utcMidnight)
         }
     }
 }
@@ -361,12 +354,7 @@ struct DayCell: View {
 }
 
 extension DayCell {
-    private static let dayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.timeZone = TimeZone(identifier: "UTC")
-        f.setLocalizedDateFormatFromTemplate("EEEEMMMMd")
-        return f
-    }()
+    private static var dayFormatter: DateFormatter { CalFormat.template("EEEEMMMMd") }
 
     /// What VoiceOver says for a day: "Today, Saturday, November 14, 2 events".
     static func spoken(_ day: CalDate, isToday: Bool, events: Int) -> String {
@@ -420,10 +408,7 @@ struct DayList: View {
     }
 
     private var dayTitle: String {
-        let f = DateFormatter()
-        f.timeZone = TimeZone(identifier: "UTC")
-        f.dateFormat = DateFormatter.dateFormat(fromTemplate: "EEEEMMMMd", options: 0, locale: .current)
-        return f.string(from: day.utcMidnight)
+        CalFormat.template("EEEEMMMMd").string(from: day.utcMidnight)
     }
 }
 
@@ -462,9 +447,7 @@ struct OccurrenceRow: View {
         case .allDay(let s, let e):
             return s.days(to: e) > 1 ? "All day · day \(s.days(to: day) + 1) of \(s.days(to: e))" : "All day"
         case .timed(let s, let e, _):
-            let f = DateFormatter()
-            f.timeStyle = .short
-            f.dateStyle = .none
+            let f = CalFormat.styles(date: .none, time: .short)
             if s == e { return f.string(from: s) }
             return "\(f.string(from: s)) – \(f.string(from: e))"
         }

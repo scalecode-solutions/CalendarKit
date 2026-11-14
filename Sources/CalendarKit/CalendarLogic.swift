@@ -112,10 +112,7 @@ public enum CalRepeatSummary {
         }
         if let c = n.count { return c == 1 ? "\(unit), once" : "\(unit), \(c) times" }
         if let u = n.until {
-            let f = DateFormatter()
-            f.timeZone = TimeZone(identifier: "UTC")
-            f.dateStyle = .medium
-            return "\(unit), until \(f.string(from: u.utcMidnight))"
+            return "\(unit), until \(CalFormat.styles(date: .medium, time: .none, zone: CalFormat.utc).string(from: u.utcMidnight))"
         }
         return unit
     }
