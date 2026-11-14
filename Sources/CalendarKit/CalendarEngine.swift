@@ -352,9 +352,14 @@ public final class CalendarEngine {
         let waiting = rebase(e.id, to: e.rev, after: pid, store: store)
         guard waiting else { return store.put(e, pending: true) }
         guard var local = store.event(e.id) else { return }
+        // Server-owned bookkeeping comes from the answer; the fields stay local
+        // (the queued write carries them, and its own answer brings back the
+        // server's normalisation).
         local.rev = e.rev
         local.createdBy = e.createdBy
         local.createdAt = e.createdAt
+        local.updatedBy = e.updatedBy
+        local.updatedAt = e.updatedAt
         store.put(local, pending: true)
     }
 
@@ -370,6 +375,8 @@ public final class CalendarEngine {
                 store.replacePending(qpid, with: .delete(id: qid, baseRev: rev)); waiting = true
             case .split(let m, _, let at, let ns, let discard) where m == id:
                 store.replacePending(qpid, with: .split(masterID: m, baseRev: rev, at: at, newSeries: ns, discardNew: discard)); waiting = true
+            case .alerts:
+                break // the person's reminders aren't event fields
             default:
                 if q.eventID == id { waiting = true }
             }
@@ -407,7 +414,8 @@ public final class CalendarEngine {
             let r = try await transport.splitSeries(masterID: master, baseRev: base, at: at, newID: s.id, fields: s.fields)
             landed(r.old, after: pid, store: store)
             if discardNew {
-                // "Delete this and following": the tail goes at once. On a
+                // "Delete this and following": the tail goes at once. It's never
+                // put in the store, so nothing can be queued against its id. On a
                 // retry the server returns the same split (idempotent by the new
                 // id), and a tail already deleted is fine.
                 if !r.new.deleted {
