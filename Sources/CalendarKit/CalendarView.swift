@@ -226,7 +226,7 @@ struct AgendaList: View {
         let g = groups
         ScrollViewReader { proxy in
             VStack(spacing: 8) {
-                WeekStrip(today: today, marks: Dictionary(g.prefix(14).map { ($0.0, Array(Set($0.1.map(\.color))).prefix(3).map { $0 }) },
+                WeekStrip(today: today, marks: Dictionary(g.prefix(14).map { ($0.0, WeekStrip.dots($0.1)) },
                                                           uniquingKeysWith: { a, _ in a })) { day in
                     // The first day with something on it, from the one tapped.
                     if let target = g.first(where: { $0.0 >= day })?.0 {
@@ -296,12 +296,19 @@ struct AgendaHeader: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
-        // Pinned over scrolling rows: mostly opaque, so their text doesn't
-        // show through the label.
-        .background(Capsule().fill(Color(uiColor: .systemBackground).opacity(0.75)))
         .glassEffect(.regular, in: Capsule())
         .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Pinned over scrolling rows: a band across the whole column, solid
+        // behind the label and fading out below it, so rows pass cleanly
+        // under the header instead of showing beside a narrow capsule.
+        .background {
+            Rectangle().fill(.regularMaterial)
+                .mask(LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.75),
+                                             .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom))
+                .padding(.horizontal, -12)
+                .padding(.bottom, -8)
+        }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
@@ -327,6 +334,17 @@ struct WeekStrip: View {
     let marks: [CalDate: [CalColor]]
     let jump: (CalDate) -> Void
     @Environment(\.calendarAccent) private var accent
+
+    /// A day's dots: its colors in the order its events come, each once, at
+    /// most three (stable from one render to the next).
+    static func dots(_ occ: [CalOccurrence]) -> [CalColor] {
+        var out: [CalColor] = []
+        for o in occ where !out.contains(o.color) {
+            out.append(o.color)
+            if out.count == 3 { break }
+        }
+        return out
+    }
 
     /// The coming week, today first: what's ahead is what the agenda is for.
     private var week: [CalDate] { (0..<7).map { today.adding(days: $0) } }

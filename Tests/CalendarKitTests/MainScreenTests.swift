@@ -37,4 +37,12 @@ struct MainScreenTests {
         let ids = (0..<3).map { AgendaItem(day: CalDate(2026, 11, 27).adding(days: $0), occurrence: trip).id }
         #expect(Set(ids).count == 3)
     }
+
+    /// The week strip's dots keep the order of the day's events, each color once.
+    @Test func weekDotsAreOrderedAndUnique() {
+        let d = CalDate(2026, 11, 14)
+        let o = [occ("a", .red, on: d, cal: cal), occ("b", .blue, on: d, cal: cal), occ("c", .red, on: d, cal: cal),
+                 occ("d", .green, on: d, cal: cal), occ("e", .pink, on: d, cal: cal)]
+        #expect(WeekStrip.dots(o) == [.red, .blue, .green])
+    }
 }
