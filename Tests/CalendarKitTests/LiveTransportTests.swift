@@ -172,6 +172,32 @@ struct LiveTransportTests {
         #expect(contacts.contains { $0.id == live.partner })
     }
 
+    /// R6 + the step-4 tolerance, end to end (Frond's ask): the same update sent
+    /// twice (a lost answer, retried) conflicts on the second send, and the
+    /// server's current copy must equal our fields exactly, weekday order
+    /// included, or a retry would become a false "someone else changed it".
+    @Test func aRetriedWeeklyUpdateMatchesWhatTheServerHolds() async throws {
+        let t = live.ownerT
+        let cal = try await own(t)
+        let rule = CalRecurrence(.weekly, weekdays: [7, 1, 5, 3]) // Sunday listed first on purpose
+        let f0 = CalEventFields(title: "Standup", when: .timed(start: monday9, end: monday9.addingTimeInterval(900), timeZone: chicago),
+                                recurrence: rule)
+        let e = try await t.createEvent(id: UUID(), calendarID: cal.id, fields: f0)
+        var f1 = e.fields
+        f1.title = "Standup (moved)"
+        f1.recurrence = CalRecurrenceExpander.normalized(rule, first: e.fields.when.firstDay)
+        let first = try await t.updateEvent(id: e.id, baseRev: e.rev, fields: f1)
+        #expect(first.fields == f1, "server copy: \(String(describing: first.fields.recurrence))")
+        do {
+            _ = try await t.updateEvent(id: e.id, baseRev: e.rev, fields: f1) // the retry
+            Issue.record("a stale base rev was accepted")
+        } catch CalTransportError.conflict(let current?) {
+            #expect(current.fields == f1, "the retry would read as someone else's change")
+            #expect(current.updatedBy == live.owner)
+        }
+        _ = try await t.deleteEvent(id: e.id, baseRev: first.rev)
+    }
+
     // MARK: two real engines (owner + partner)
 
     @MainActor func engine(_ user: UUID, _ token: String) -> CalendarEngine {

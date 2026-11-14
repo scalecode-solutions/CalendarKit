@@ -19,16 +19,22 @@ public enum CalRecurrenceExpander {
     /// Guards against a rule that keeps producing nothing.
     static let maxSteps = 200_000
 
-    /// Fills the defaults the server fills: interval ≥ 1, weekly days default to
-    /// the start's, sorted and unique.
+    /// The one canonical form of a rule, the server's: interval ≥ 1; weekly
+    /// days sorted, unique, defaulting to the start's; no weekdays unless weekly
+    /// (the server refuses them); the monthly mode only on a monthly rule. Every
+    /// rule is compared, built and decoded through this (review R2, R6, R53).
     public static func normalized(_ r: CalRecurrence, first: CalDate) -> CalRecurrence {
+        var r = canonical(r)
+        if r.frequency == .weekly && r.weekdays.isEmpty { r.weekdays = [first.isoWeekday] }
+        return r
+    }
+
+    /// `normalized` without a start date to default from (decoding, comparing).
+    public static func canonical(_ r: CalRecurrence) -> CalRecurrence {
         var r = r
         r.interval = max(1, r.interval)
-        if r.frequency == .weekly {
-            var days = Set(r.weekdays.filter { (1...7).contains($0) })
-            if days.isEmpty { days = [first.isoWeekday] }
-            r.weekdays = days.sorted()
-        }
+        r.weekdays = r.frequency == .weekly ? Set(r.weekdays.filter { (1...7).contains($0) }).sorted() : []
+        if r.frequency != .monthly { r.monthly = .dayOfMonth }
         return r
     }
 

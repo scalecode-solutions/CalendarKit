@@ -86,6 +86,31 @@ struct UILogicTests {
         if case .success(let f) = d.fields() { #expect(f.recurrence?.monthly == .nthWeekday) }
     }
 
+    /// R2: switching a custom rule away from weekly drops its weekdays (the
+    /// server refuses weekdays on anything else), and the monthly mode only
+    /// stays on a monthly rule.
+    @Test func switchingAwayFromWeeklyDropsTheWeekdays() {
+        let tue = CalRecurrenceExpander.wallClock(CalDate(2026, 11, 17), hour: 9, minute: 0, second: 0, in: chicago)
+        var d = CalEventDraft(start: tue, end: tue, timeZone: chicago)
+        d.title = "x"
+        d.repeatPreset = .custom
+        d.customRule = CalRecurrence(.weekly, weekdays: [2, 4])
+        d.customRule.frequency = .monthly
+        if case .success(let f) = d.fields() { #expect(f.recurrence?.weekdays == []) } else { Issue.record("should save") }
+        d.customRule = CalRecurrence(.monthly, weekdays: [2], monthly: .nthWeekday)
+        d.customRule.frequency = .daily
+        if case .success(let f) = d.fields() {
+            #expect(f.recurrence?.weekdays == [] && f.recurrence?.monthly == .dayOfMonth)
+        }
+    }
+
+    /// R6: the same rule in another weekday order is the same rule.
+    @Test func ruleOrderDoesNotMatter() {
+        let a = CalRecurrenceExpander.canonical(CalRecurrence(.weekly, weekdays: [7, 3]))
+        let b = CalRecurrenceExpander.canonical(CalRecurrence(.weekly, weekdays: [3, 7, 3]))
+        #expect(a == b && a.weekdays == [3, 7])
+    }
+
     @Test func allDayDraftsAreInclusiveForPeopleExclusiveOnTheWire() {
         let day = CalRecurrenceExpander.wallClock(CalDate(2026, 11, 20), hour: 0, minute: 0, second: 0, in: chicago)
         var d = CalEventDraft(start: day, end: day, timeZone: chicago)

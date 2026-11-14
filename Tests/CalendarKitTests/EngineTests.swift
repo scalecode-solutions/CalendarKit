@@ -776,3 +776,24 @@ struct LostAnswerTests {
         #expect(live == 1, "the tail series survived on the server")
     }
 }
+
+/// R6/R53: a series whose rule the server sends in another weekday order keeps
+/// its exceptions when only its title changes.
+@MainActor
+@Suite("Engine: rule order", .serialized)
+struct RuleOrderTests {
+    @Test func aTitleEditKeepsTheExceptionsOfASundaySeries() async {
+        let (engine, server, own) = makeEngine()
+        // As the old server sent it: Sunday (7) before Wednesday (3).
+        let s = server.externalCreate(own, allDay("Gym", 2026, 11, 1, repeating: CalRecurrence(.weekly, weekdays: [7, 3])))
+        await engine.refresh()
+        let occ = engine.occurrences(from: nov.0, through: nov.1).filter { $0.seriesID == s.id }
+        engine.deleteOccurrence(occ[1])
+        await engine.refresh()
+        let before = engine.occurrences(from: nov.0, through: nov.1).count
+        var f = engine.event(s.id)!.fields
+        f.title = "Gym (renamed)"
+        engine.updateEvent(engine.event(s.id)!, f)
+        #expect(engine.occurrences(from: nov.0, through: nov.1).count == before, "the cancelled occurrence came back")
+    }
+}

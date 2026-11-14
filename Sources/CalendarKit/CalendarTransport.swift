@@ -317,7 +317,8 @@ enum Wire {
         case .yearly: w.freq = .yearly
         }
         w.interval = Int32(r.interval)
-        w.byWeekday = r.weekdays.compactMap { Calendar_V1_Weekday(rawValue: $0) } // ISO 1...7 = proto 1...7
+        // Canonical form: no weekdays off weekly (the server refuses them), sorted.
+        w.byWeekday = CalRecurrenceExpander.canonical(r).weekdays.compactMap { Calendar_V1_Weekday(rawValue: $0) } // ISO 1...7 = proto 1...7
         if r.frequency == .monthly {
             switch r.monthly {
             case .dayOfMonth: w.monthly = .dayOfMonth
@@ -345,10 +346,11 @@ enum Wire {
         case .lastWeekday: mode = .lastWeekday
         default: mode = .dayOfMonth
         }
-        return CalRecurrence(freq, interval: max(1, Int(w.interval)),
-                             weekdays: w.byWeekday.map(\.rawValue).filter { (1...7).contains($0) },
-                             monthly: mode, until: w.hasUntil ? day(w.until) : nil,
-                             count: w.count > 0 ? Int(w.count) : nil)
+        return CalRecurrenceExpander.canonical(
+            CalRecurrence(freq, interval: max(1, Int(w.interval)),
+                          weekdays: w.byWeekday.map(\.rawValue).filter { (1...7).contains($0) },
+                          monthly: mode, until: w.hasUntil ? day(w.until) : nil,
+                          count: w.count > 0 ? Int(w.count) : nil))
     }
 
     // events

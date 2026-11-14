@@ -574,7 +574,8 @@ public final class CalendarEngine {
         guard let store, var e = store.event(event.id) else { return }
         var f = fields
         if let r = f.recurrence { f.recurrence = CalRecurrenceExpander.normalized(r, first: f.when.firstDay) }
-        let timingChanged = e.isSeries && (e.fields.when != f.when || e.fields.recurrence != f.recurrence)
+        let timingChanged = e.isSeries && (e.fields.when != f.when
+            || e.fields.recurrence.map(CalRecurrenceExpander.canonical) != f.recurrence.map(CalRecurrenceExpander.canonical))
         e.fields = f
         e.cancelled = false
         e.updatedBy = config.currentUserID
