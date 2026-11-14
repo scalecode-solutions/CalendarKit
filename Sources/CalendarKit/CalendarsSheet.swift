@@ -44,14 +44,14 @@ public struct CalendarSettingsView<Extra: View>: View {
             }
             if let own = engine.ownCalendar {
                 Section("My calendar") {
-                    NavigationLink("Name and color") { OwnCalendarSettings(engine: engine, calendar: own) }
-                    NavigationLink("Labels") { LabelsView(engine: engine) }
-                    NavigationLink("Sharing") { SharingView(engine: engine) }
-                    NavigationLink("Activity") { ActivityView(engine: engine) }
+                    NavigationLink("Name and color") { OwnCalendarSettings(engine: engine, calendar: own).calendarAccent(engine.accentColor) }
+                    NavigationLink("Labels") { LabelsView(engine: engine).calendarAccent(engine.accentColor) }
+                    NavigationLink("Sharing") { SharingView(engine: engine).calendarAccent(engine.accentColor) }
+                    NavigationLink("Activity") { ActivityView(engine: engine).calendarAccent(engine.accentColor) }
                 }
             }
             Section {
-                NavigationLink("Default reminders") { DefaultRemindersView(engine: engine) }
+                NavigationLink("Default reminders") { DefaultRemindersView(engine: engine).calendarAccent(engine.accentColor) }
             } footer: {
                 if engine.pendingCount > 0 {
                     Text("\(engine.pendingCount) change\(engine.pendingCount == 1 ? "" : "s") waiting to sync.")
@@ -195,6 +195,7 @@ struct SharingView: View {
                     }
                 }
             }
+            .calendarAccent(engine.accentColor)
         }
     }
 
