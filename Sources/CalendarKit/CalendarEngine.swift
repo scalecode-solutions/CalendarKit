@@ -306,7 +306,7 @@ public final class CalendarEngine {
         // Events deleted here and not yet sent: a page (perhaps built before
         // the delete reached the server) mustn't bring them back (R41).
         let deleting = Set(store.pending().compactMap { (_, w) -> UUID? in
-            if case .delete(let id, _) = w { return id }
+            if case .delete(let id, _, _) = w { return id }
             return nil
         })
         // A calendar this device holds nothing confirmed for (cursor 0) that the
@@ -424,8 +424,8 @@ public final class CalendarEngine {
             switch q {
             case .update(let qid, _, let f) where qid == id:
                 store.replacePending(qpid, with: .update(id: qid, baseRev: rev, fields: f)); waiting = true
-            case .delete(let qid, _) where qid == id:
-                store.replacePending(qpid, with: .delete(id: qid, baseRev: rev)); waiting = true
+            case .delete(let qid, _, let cal) where qid == id:
+                store.replacePending(qpid, with: .delete(id: qid, baseRev: rev, calendarID: cal)); waiting = true
             case .split(let m, _, let at, let ns, let discard) where m == id:
                 store.replacePending(qpid, with: .split(masterID: m, baseRev: rev, at: at, newSeries: ns, discardNew: discard)); waiting = true
             case .alerts:
@@ -459,7 +459,7 @@ public final class CalendarEngine {
                 // already has exactly this change, from us. Done, not a race.
                 landed(try live(current), after: pid, store: store)
             }
-        case .delete(let id, let base):
+        case .delete(let id, let base, _):
             do {
                 _ = try await transport.deleteEvent(id: id, baseRev: base)
             } catch CalTransportError.notFound {
@@ -566,7 +566,7 @@ public final class CalendarEngine {
                 default: continue
                 }
             }
-        case .delete(let id, _):
+        case .delete(let id, _, let cal):
             var sawCreate = false
             for (pid, q) in queued where q.eventID == id {
                 // A split made another series that still has to happen; the
@@ -576,7 +576,7 @@ public final class CalendarEngine {
                 if case .exception = q { sawCreate = true }
                 if case .update(_, let base, _) = q {
                     store.dropPending(pid)
-                    store.enqueue(.delete(id: id, baseRev: base))
+                    store.enqueue(.delete(id: id, baseRev: base, calendarID: cal))
                     return
                 }
                 store.dropPending(pid)
@@ -652,7 +652,7 @@ public final class CalendarEngine {
         guard let store, let e = store.event(event.id) else { return }
         store.removeEvent(e.id)
         if e.isSeries { store.removeExceptions(of: e.id) }
-        commit(.delete(id: e.id, baseRev: e.rev))
+        commit(.delete(id: e.id, baseRev: e.rev, calendarID: e.calendarID))
     }
 
     /// Change just this occurrence of a series.

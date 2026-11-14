@@ -148,7 +148,10 @@ enum PendingWrite: Codable, Equatable, Sendable {
     case create(CalEvent)
     case exception(CalEvent)
     case update(id: UUID, baseRev: Int64, fields: CalEventFields)
-    case delete(id: UUID, baseRev: Int64)
+    /// calendarID: where it was, so a refusal can reload that calendar (the
+    /// local copy is already gone by then). Optional so queues stored before it
+    /// still decode.
+    case delete(id: UUID, baseRev: Int64, calendarID: UUID? = nil)
     /// discardNew: "delete this and all future" (the tail is deleted at once).
     case split(masterID: UUID, baseRev: Int64, at: CalOriginalStart, newSeries: CalEvent, discardNew: Bool)
     case alerts(eventID: UUID, minutes: [Int])
@@ -162,7 +165,7 @@ enum PendingWrite: Codable, Equatable, Sendable {
     var eventID: UUID? {
         switch self {
         case .create(let e), .exception(let e): return e.id
-        case .update(let id, _, _), .delete(let id, _): return id
+        case .update(let id, _, _), .delete(let id, _, _): return id
         case .split(let m, _, _, _, _): return m
         default: return nil
         }
@@ -172,7 +175,8 @@ enum PendingWrite: Codable, Equatable, Sendable {
     func calendarID(lookup: (UUID) -> UUID?) -> UUID? {
         switch self {
         case .create(let e), .exception(let e): return e.calendarID
-        case .update(let id, _, _), .delete(let id, _): return lookup(id)
+        case .update(let id, _, _): return lookup(id)
+        case .delete(let id, _, let c): return c ?? lookup(id)
         case .split(_, _, _, let s, _): return s.calendarID
         case .saveLabel(let l): return l.calendarID
         case .deleteLabel(_, let c): return c
