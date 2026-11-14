@@ -296,6 +296,9 @@ public struct CalSyncPage: Equatable, Sendable {
     public let deltas: [CalDelta]
     public let gone: [UUID]
     public let alerts: [CalAlert]
+    /// The next alerts cursor (the last alert sent, when the list was cut).
     public let alertsRev: Int64
     public let alertDefaults: CalAlertDefaults
+    /// The alerts were cut at the server's per-Sync cap: sync again for the rest.
+    public var alertsHasMore = false
 }

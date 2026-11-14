@@ -283,7 +283,9 @@ public final class CalendarEngine {
                 apply(page, to: store)
                 store.save()
                 publish()
-                if !page.deltas.contains(where: \.hasMore) { break }
+                // More of a calendar (or calendars the server didn't get to),
+                // or more alerts: ask again.
+                if !page.deltas.contains(where: \.hasMore) && !page.alertsHasMore { break }
             }
             store.lastSync = Date()
             store.save()
@@ -341,7 +343,9 @@ public final class CalendarEngine {
             store.setCursor(d.calendarID, d.rev, loadFrom: d.loadFrom)
         }
         for a in page.alerts { store.putAlert(a) }
-        store.alertsCursor = page.alerts.count >= 5000 ? (page.alerts.map(\.rev).max() ?? store.alertsCursor) : page.alertsRev
+        // The server's cursor is right even when it cut the list (it's then the
+        // last alert sent), so no guessing from a count (R58, R66).
+        store.alertsCursor = page.alertsRev
         store.alertDefaults = page.alertDefaults
     }
 

@@ -30,6 +30,9 @@ final class FakeServer: CalendarTransport, Sendable {
         /// Fail every write with this until cleared (a broken server).
         var failAllWrites: CalTransportError?
         var failedWrites = 0
+        /// The server's MaxAlertsPerSync and MaxPagesPerSync.
+        var maxAlertsPerSync = 5000
+        var maxPagesPerSync = 4
     }
 
     /// The answer to a write that was applied: lost if loseNextAnswer is set.
@@ -126,6 +129,7 @@ final class FakeServer: CalendarTransport, Sendable {
             s.syncs += 1
             // The real server's paging and reload rules (internal/store/sync.go):
             // pages never split one rev; a load cursor is judged by load_from.
+            var budget = s.pageLimit * s.maxPagesPerSync // rows per Sync across calendars
             let deltas: [CalDelta] = s.calendars.compactMap { c in
                 var cur = max(0, cursors[c.id]?.rev ?? 0)
                 var loadFrom = cur == 0 ? 0 : max(0, cursors[c.id]?.loadFrom ?? 0)
@@ -133,6 +137,11 @@ final class FakeServer: CalendarTransport, Sendable {
                 let reset = loadFrom > 0 ? loadFrom < purged : (cur > 0 && cur < purged)
                 if reset { cur = 0; loadFrom = 0 }
                 guard cur < c.rev || reset else { return nil }
+                if budget <= 0 { // not this time: come back, cursor unchanged
+                    let held = cursors[c.id] ?? CalCursor(rev: 0)
+                    return CalDelta(calendarID: c.id, events: [], labels: [], deletedLabelIDs: [],
+                                    rev: held.rev, hasMore: true, reload: false, loadFrom: held.loadFrom)
+                }
                 let live = cur == 0
                 let evs = s.events.values.filter { $0.calendarID == c.id && $0.rev > cur && (!live || !$0.deleted) }
                 let ls = s.labels.values.filter { $0.0.calendarID == c.id && $0.0.rev > cur && (!live || !$0.deleted) }
@@ -146,15 +155,19 @@ final class FakeServer: CalendarTransport, Sendable {
                 }
                 let pageEvents = evs.filter { $0.rev <= hi }.sorted { $0.rev < $1.rev }
                 let pageLabels = ls.filter { $0.0.rev <= hi }
+                budget -= pageEvents.count + pageLabels.count
                 return CalDelta(calendarID: c.id, events: pageEvents,
                                 labels: pageLabels.filter { !$0.deleted }.map(\.0), deletedLabelIDs: pageLabels.filter(\.deleted).map(\.0.id),
                                 rev: hi, hasMore: more, reload: reset,
                                 loadFrom: more ? (cur == 0 ? c.rev : loadFrom) : 0)
             }
             let gone = cursors.keys.filter { id in !s.calendars.contains { $0.id == id } }
+            let pending = s.alerts.values.filter { $0.rev > alertsCursor }.sorted { $0.rev < $1.rev }
+            let cut = pending.count > s.maxAlertsPerSync
+            let alerts = Array(pending.prefix(s.maxAlertsPerSync))
             return CalSyncPage(calendars: s.calendars, deltas: deltas, gone: gone,
-                               alerts: s.alerts.values.filter { $0.rev > alertsCursor }, alertsRev: s.alertsRev,
-                               alertDefaults: s.defaults)
+                               alerts: alerts, alertsRev: cut ? alerts.last!.rev : s.alertsRev,
+                               alertDefaults: s.defaults, alertsHasMore: cut)
         }
     }
 

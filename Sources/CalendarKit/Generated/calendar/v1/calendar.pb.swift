@@ -653,7 +653,9 @@ public nonisolated struct Calendar_V1_SyncRequest: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  /// calendars the client holds; others load from 0
+  /// Calendars the client holds; others load from 0. At most 4096. A Sync
+  /// sends a bounded amount of rows: calendars it didn't get to come back as
+  /// empty deltas with has_more and the cursor unchanged.
   public var cursors: [Calendar_V1_CalendarCursor] = []
 
   public var alertsCursor: Int64 = 0
@@ -709,7 +711,7 @@ public nonisolated struct Calendar_V1_SyncResponse: Sendable {
 
   public var alerts: [Calendar_V1_Alert] = []
 
-  /// next alerts_cursor
+  /// next alerts_cursor (the last alert sent, when cut)
   public var alertsRev: Int64 = 0
 
   public var alertDefaults: Calendar_V1_AlertDefaults {
@@ -720,6 +722,9 @@ public nonisolated struct Calendar_V1_SyncResponse: Sendable {
   public var hasAlertDefaults: Bool {self._alertDefaults != nil}
   /// Clears the value of `alertDefaults`. Subsequent reads from it will return its default value.
   public mutating func clearAlertDefaults() {self._alertDefaults = nil}
+
+  /// The alerts were cut (at the server's per-Sync cap): sync again for the rest.
+  public var alertsHasMore: Bool = false
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -2219,7 +2224,7 @@ nonisolated extension Calendar_V1_CalendarDelta: SwiftProtobuf.Message, SwiftPro
 
 nonisolated extension Calendar_V1_SyncResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SyncResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}calendars\0\u{1}deltas\0\u{1}gone\0\u{1}alerts\0\u{3}alerts_rev\0\u{3}alert_defaults\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}calendars\0\u{1}deltas\0\u{1}gone\0\u{1}alerts\0\u{3}alerts_rev\0\u{3}alert_defaults\0\u{3}alerts_has_more\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2233,6 +2238,7 @@ nonisolated extension Calendar_V1_SyncResponse: SwiftProtobuf.Message, SwiftProt
       case 4: try { try decoder.decodeRepeatedMessageField(value: &self.alerts) }()
       case 5: try { try decoder.decodeSingularInt64Field(value: &self.alertsRev) }()
       case 6: try { try decoder.decodeSingularMessageField(value: &self._alertDefaults) }()
+      case 7: try { try decoder.decodeSingularBoolField(value: &self.alertsHasMore) }()
       default: break
       }
     }
@@ -2261,6 +2267,9 @@ nonisolated extension Calendar_V1_SyncResponse: SwiftProtobuf.Message, SwiftProt
     try { if let v = self._alertDefaults {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
     } }()
+    if self.alertsHasMore != false {
+      try visitor.visitSingularBoolField(value: self.alertsHasMore, fieldNumber: 7)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -2271,6 +2280,7 @@ nonisolated extension Calendar_V1_SyncResponse: SwiftProtobuf.Message, SwiftProt
     if lhs.alerts != rhs.alerts {return false}
     if lhs.alertsRev != rhs.alertsRev {return false}
     if lhs._alertDefaults != rhs._alertDefaults {return false}
+    if lhs.alertsHasMore != rhs.alertsHasMore {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -457,6 +457,7 @@ enum Wire {
             gone: try w.gone.map(uuid),
             alerts: try w.alerts.map(alert),
             alertsRev: w.alertsRev,
-            alertDefaults: defaults(w.alertDefaults))
+            alertDefaults: defaults(w.alertDefaults),
+            alertsHasMore: w.alertsHasMore)
     }
 }
