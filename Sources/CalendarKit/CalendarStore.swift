@@ -212,6 +212,10 @@ final class CalendarStore {
     func encode<T: Encodable>(_ v: T) -> Data { (try? encoder.encode(v)) ?? Data() }
     func decode<T: Decodable>(_ t: T.Type, _ d: Data) -> T? { try? decoder.decode(t, from: d) }
 
+    /// Bumped by every change to cached events, so the engine can tell when
+    /// occurrences it built are stale (R22).
+    private(set) var eventChanges = 0
+
     func save() {
         do { try context.save() } catch { log.error("save failed: \(error.localizedDescription, privacy: .public)") }
     }
@@ -262,6 +266,7 @@ final class CalendarStore {
 
     /// A calendar the person can no longer see: drop it and everything in it.
     func removeCalendar(_ id: UUID) {
+        eventChanges += 1
         if let r = calendarRecord(id) { context.delete(r) }
         try? context.delete(model: EventRecord.self, where: #Predicate { $0.calendarID == id })
         try? context.delete(model: LabelRecord.self, where: #Predicate { $0.calendarID == id })
@@ -277,6 +282,7 @@ final class CalendarStore {
 
     /// Write an event (pending = a local change the server hasn't confirmed).
     func put(_ e: CalEvent, pending: Bool) {
+        eventChanges += 1
         if let r = eventRecord(e.id) {
             r.payload = encode(e)
             r.calendarID = e.calendarID
@@ -295,6 +301,7 @@ final class CalendarStore {
     /// waiting, or in `skip`, are left alone.
     func applyServerEvents(_ events: [CalEvent], skip: Set<UUID>) {
         guard !events.isEmpty else { return }
+        eventChanges += 1
         let ids = events.map(\.id)
         let rows = (try? context.fetch(FetchDescriptor<EventRecord>(predicate: #Predicate { ids.contains($0.id) }))) ?? []
         var byID = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
@@ -330,17 +337,20 @@ final class CalendarStore {
     func setPending(_ id: UUID, _ pending: Bool) { eventRecord(id)?.pending = pending }
 
     func removeEvent(_ id: UUID) {
+        eventChanges += 1
         if let r = eventRecord(id) { context.delete(r) }
     }
 
     /// Remove a series' exceptions (not pending ones).
     func removeExceptions(of master: UUID) {
+        eventChanges += 1
         try? context.delete(model: EventRecord.self, where: #Predicate { $0.masterID == master && !$0.pending })
     }
 
     /// Before a full load of a calendar: forget what the server will resend
     /// (local pending changes stay).
     func clearForReload(_ calendarID: UUID) {
+        eventChanges += 1
         try? context.delete(model: EventRecord.self, where: #Predicate { $0.calendarID == calendarID && !$0.pending })
         try? context.delete(model: LabelRecord.self, where: #Predicate { $0.calendarID == calendarID })
     }
@@ -473,6 +483,7 @@ final class CalendarStore {
 
     /// Sign-out: delete everything.
     func wipeAll() {
+        eventChanges += 1
         try? context.delete(model: CalendarRecord.self)
         try? context.delete(model: EventRecord.self)
         try? context.delete(model: LabelRecord.self)

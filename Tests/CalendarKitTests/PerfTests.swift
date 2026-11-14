@@ -59,4 +59,19 @@ struct PerfTests {
         _ = (server, own)
         #expect(count > 0)
     }
+
+    /// A sync that brings nothing new doesn't make the views rebuild (R22).
+    @Test func aQuietSyncKeepsTheRevision() async {
+        let (engine, server, own) = makeEngine()
+        _ = server.externalCreate(own, allDay("x", 2026, 11, 5))
+        await engine.refresh()
+        let r = engine.revision
+        await engine.refresh()
+        await engine.refresh()
+        #expect(engine.revision == r)
+        _ = server.externalCreate(own, allDay("y", 2026, 11, 6))
+        await engine.refresh()
+        #expect(engine.revision > r)
+        #expect(engine.occurrences(from: nov.0, through: nov.1).count == 2) // and the cache saw it
+    }
 }

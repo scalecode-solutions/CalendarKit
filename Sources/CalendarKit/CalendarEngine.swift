@@ -167,6 +167,8 @@ public final class CalendarEngine {
         pendingCount = 0
         loadState = .idle
         lastError = nil
+        occurrenceCache.removeAll()
+        publishedEventChanges = -1
         revision += 1
     }
 
@@ -182,16 +184,27 @@ public final class CalendarEngine {
     }
 
     /// Copy the store's state into the observable properties.
+    /// Publish the cache to the views. Only what changed is assigned, and
+    /// `revision` moves only when something did, so a sync that brought
+    /// nothing new doesn't make every view rebuild (R22).
     private func publish() {
         guard let store else { return }
-        calendars = store.calendars().map(\.0)
-        let visible = Set(calendars.map(\.id))
-        labels = store.labels().filter { visible.contains($0.calendarID) }
-        alerts = store.alerts()
-        alertDefaults = store.alertDefaults
-        pendingCount = store.pendingCount
-        revision += 1
+        var changed = store.eventChanges != publishedEventChanges
+        publishedEventChanges = store.eventChanges
+        let cals = store.calendars().map(\.0)
+        if cals != calendars { calendars = cals; changed = true }
+        let visible = Set(cals.map(\.id))
+        let ls = store.labels().filter { visible.contains($0.calendarID) }
+        if ls != labels { labels = ls; changed = true }
+        let al = store.alerts()
+        if al != alerts { alerts = al; changed = true }
+        let defaults = store.alertDefaults
+        if defaults != alertDefaults { alertDefaults = defaults; changed = true }
+        let pc = store.pendingCount
+        if pc != pendingCount { pendingCount = pc; changed = true }
+        if changed { revision += 1 }
     }
+    private var publishedEventChanges = -1
 
     public func dismissNotice(_ n: CalNotice) { notices.removeAll { $0.id == n.id } }
 
@@ -224,6 +237,30 @@ public final class CalendarEngine {
     public func occurrences(from: CalDate, through: CalDate, zone: TimeZone = .current,
                             includeHidden: Bool = false) -> [CalOccurrence] {
         guard let store else { return [] }
+        // Built once per (cache contents, published state, range): a view body
+        // pass that only moved the selection, or a sync that changed nothing,
+        // reuses it (R22).
+        let key = OccurrenceKey(events: store.eventChanges, revision: revision, from: from, through: through,
+                                zone: zone.identifier, hidden: includeHidden)
+        if let hit = occurrenceCache[key] { return hit }
+        if let any = occurrenceCache.keys.first, any.events != key.events || any.revision != key.revision {
+            occurrenceCache.removeAll(keepingCapacity: true)
+        }
+        if occurrenceCache.count >= 8 { occurrenceCache.removeAll(keepingCapacity: true) }
+        let built = buildOccurrences(store, from: from, through: through, zone: zone, includeHidden: includeHidden)
+        occurrenceCache[key] = built
+        return built
+    }
+
+    private struct OccurrenceKey: Hashable {
+        let events: Int, revision: Int
+        let from: CalDate, through: CalDate
+        let zone: String, hidden: Bool
+    }
+    private var occurrenceCache: [OccurrenceKey: [CalOccurrence]] = [:]
+
+    private func buildOccurrences(_ store: CalendarStore, from: CalDate, through: CalDate, zone: TimeZone,
+                                  includeHidden: Bool) -> [CalOccurrence] {
         let cals = calendars.filter { includeHidden || $0.visible }
         var events = store.events(in: cals.map(\.id), from: from.adding(days: -1), through: through.adding(days: 1))
         // An occurrence moved outside its series' days (the last one moved past
