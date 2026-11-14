@@ -225,7 +225,12 @@ public final class CalendarEngine {
                             includeHidden: Bool = false) -> [CalOccurrence] {
         guard let store else { return [] }
         let cals = calendars.filter { includeHidden || $0.visible }
-        let events = store.events(in: cals.map(\.id), from: from.adding(days: -1), through: through.adding(days: 1))
+        var events = store.events(in: cals.map(\.id), from: from.adding(days: -1), through: through.adding(days: 1))
+        // An occurrence moved outside its series' days (the last one moved past
+        // the end, the first before the start) is found by its own days; its
+        // series has to come along to be expanded (R10, R26).
+        let missing = Set(events.compactMap(\.masterID)).subtracting(events.map(\.id))
+        if !missing.isEmpty { events += store.events(ids: missing) }
         let series = events.filter(\.isSeries).map(\.id)
         let exceptions = series.isEmpty ? [] : store.exceptions(of: series)
         return OccurrenceBuilder.build(events: events, exceptions: exceptions,

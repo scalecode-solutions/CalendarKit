@@ -318,6 +318,13 @@ final class CalendarStore {
         return rows.compactMap { decode(CalEvent.self, $0.payload) }
     }
 
+    /// Events by id (the series of exceptions found by their own days).
+    func events(ids: Set<UUID>) -> [CalEvent] {
+        let wanted = Array(ids)
+        let rows = (try? context.fetch(FetchDescriptor<EventRecord>(predicate: #Predicate { wanted.contains($0.id) }))) ?? []
+        return rows.compactMap { decode(CalEvent.self, $0.payload) }
+    }
+
     /// Exceptions of the given series (for expansion).
     func exceptions(of masters: [UUID]) -> [CalEvent] {
         let ids = Set(masters)
