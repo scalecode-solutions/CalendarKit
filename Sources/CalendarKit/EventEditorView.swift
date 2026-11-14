@@ -126,6 +126,7 @@ struct EventEditorView: View {
 
 struct RepeatSection: View {
     @Binding var draft: CalEventDraft
+    @Environment(\.calendarAccent) private var accent
 
     var body: some View {
         Section {
@@ -203,7 +204,7 @@ struct RepeatSection: View {
                         .font(.footnote.weight(.semibold))
                         .frame(width: 32, height: 32)
                         .background(on ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary), in: Circle())
-                        .foregroundStyle(on ? .white : .primary)
+                        .foregroundStyle(on ? AnyShapeStyle(CalOnTint(accent)) : AnyShapeStyle(.primary))
                 }
                 .buttonStyle(.plain)
                 .frame(maxWidth: .infinity)
@@ -238,7 +239,7 @@ struct ColorRow: View {
                         Circle()
                             .fill(c == .none ? AnyShapeStyle(.quaternary) : AnyShapeStyle(CalTint(c)))
                             .frame(width: 26, height: 26)
-                            .overlay { if selection == c { Image(systemName: "checkmark").font(.caption.weight(.bold)).foregroundStyle(.white) } }
+                            .overlay { if selection == c { Image(systemName: "checkmark").font(.caption.weight(.bold)).foregroundStyle(c == .none ? AnyShapeStyle(.primary) : AnyShapeStyle(CalOnTint(c))) } }
                             .overlay { if c == .none { Image(systemName: "slash.circle").foregroundStyle(.secondary) } }
                     }
                     .buttonStyle(.plain)

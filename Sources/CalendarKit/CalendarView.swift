@@ -15,7 +15,6 @@ public struct CalendarView: View {
     @State private var editor: EditorRequest?
     @State private var detail: CalOccurrence?
     @AppStorage("CalendarKit.mode") private var mode: CalendarMode = .month
-    @Environment(\.colorScheme) private var scheme
 
     private let zone = TimeZone.current
     private let firstWeekday = Calendar.current.firstWeekday
@@ -28,7 +27,6 @@ public struct CalendarView: View {
         _month = State(initialValue: (today.year, today.month))
     }
 
-    private var accent: Color { engine.accentColor.color(dark: scheme == .dark) }
 
     private var layout: MonthLayout { MonthLayout(year: month.year, month: month.month, firstWeekday: firstWeekday) }
     private var today: CalDate { CalDate(Date(), in: zone) }
@@ -59,10 +57,10 @@ public struct CalendarView: View {
             }
             .padding(.top, 4)
         }
-        .tint(accent)
+        .calendarAccent(engine.accentColor)
         .sheet(item: $editor) { req in
             NavigationStack { EventEditorView(engine: engine, request: req) }
-                .tint(accent)
+                .calendarAccent(engine.accentColor)
         }
         .sheet(item: $detail) { o in
             NavigationStack {
@@ -74,7 +72,7 @@ public struct CalendarView: View {
                     }
                 }
             }
-            .tint(accent)
+            .calendarAccent(engine.accentColor)
             .presentationDetents([.medium, .large])
         }
     }
@@ -91,6 +89,7 @@ public struct CalendarView: View {
             Spacer()
             Button { editor = .new(mode == .month ? selected : today) } label: {
                 Image(systemName: "plus").font(.body.weight(.semibold)).frame(width: 22, height: 22)
+                    .foregroundStyle(CalOnTint(engine.accentColor))
             }
             .buttonStyle(.glassProminent)
             .buttonBorderShape(.circle)
@@ -309,16 +308,27 @@ struct DayCell: View {
     let isToday: Bool
     let isSelected: Bool
     let colors: [CalColor]
+    @Environment(\.calendarAccent) private var accent
+
+    /// Selected today: the accent with black or white on it. Selected another
+    /// day: an inverted disc (dark on light, light on dark).
+    private var numberStyle: AnyShapeStyle {
+        switch (isSelected, isToday) {
+        case (true, true): AnyShapeStyle(CalOnTint(accent))
+        case (true, false): AnyShapeStyle(Color(uiColor: .systemBackground))
+        case (false, true): AnyShapeStyle(.tint)
+        case (false, false): inMonth ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary)
+        }
+    }
 
     var body: some View {
         VStack(spacing: 3) {
             Text("\(day.day)")
                 .font(.callout.weight(isToday || isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? AnyShapeStyle(.white) : isToday ? AnyShapeStyle(.tint)
-                                 : inMonth ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                .foregroundStyle(numberStyle)
                 .frame(width: 32, height: 32)
                 .background {
-                    if isSelected { Circle().fill(isToday ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary)) }
+                    if isSelected { Circle().fill(isToday ? AnyShapeStyle(.tint) : AnyShapeStyle(Color(uiColor: .label))) }
                 }
             HStack(spacing: 3) {
                 ForEach(Array(colors.enumerated()), id: \.offset) { _, c in

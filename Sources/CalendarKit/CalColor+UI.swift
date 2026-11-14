@@ -10,6 +10,35 @@ public extension CalColor {
         return Color(red: Double(c.0) / 255, green: Double(c.1) / 255, blue: Double(c.2) / 255)
     }
 
+    /// Black or white, whichever reads better on this color in this scheme
+    /// (WCAG contrast). Use it for any text or glyph drawn on a palette color:
+    /// white on the bright dark-mode colors (yellow, mint, cyan, sky) is ~1.5:1.
+    func onColor(dark: Bool) -> Color { textIsBlack(dark: dark) ? .black : .white }
+
+    /// Whether black text beats white on this color.
+    func textIsBlack(dark: Bool) -> Bool {
+        let l = luminance(dark: dark)
+        return (l + 0.05) / 0.05 > 1.05 / (l + 0.05)
+    }
+
+    /// The contrast ratio of `onColor` on this color. Never below ~4.58:1, since
+    /// one of black and white always clears that on any color.
+    func textContrast(dark: Bool) -> Double {
+        let l = luminance(dark: dark)
+        return max((l + 0.05) / 0.05, 1.05 / (l + 0.05))
+    }
+
+    /// WCAG 2 relative luminance of this scheme's color.
+    func luminance(dark: Bool) -> Double {
+        let (l, d) = rgb
+        let c = dark ? d : l
+        func lin(_ v: Int) -> Double {
+            let s = Double(v) / 255
+            return s <= 0.04045 ? s / 12.92 : pow((s + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * lin(c.0) + 0.7152 * lin(c.1) + 0.0722 * lin(c.2)
+    }
+
     /// Display name for pickers.
     var title: String { self == .none ? "Default" : rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
 
@@ -40,6 +69,36 @@ public struct CalTint: ShapeStyle {
     public func resolve(in environment: EnvironmentValues) -> Color {
         color.color(dark: environment.colorScheme == .dark)
     }
+}
+
+/// Black or white for text drawn on a palette color, following light/dark.
+public struct CalOnTint: ShapeStyle {
+    public let color: CalColor
+    public init(_ color: CalColor) { self.color = color }
+    public func resolve(in environment: EnvironmentValues) -> Color {
+        color.onColor(dark: environment.colorScheme == .dark)
+    }
+}
+
+extension EnvironmentValues {
+    /// The palette color behind `.tint`, so text drawn on the tint can pick
+    /// black or white (`CalOnTint(accent)`).
+    @Entry var calendarAccent: CalColor = .indigo
+}
+
+private struct CalendarAccent: ViewModifier {
+    let color: CalColor
+    @Environment(\.colorScheme) private var scheme
+    func body(content: Content) -> some View {
+        content
+            .tint(color.color(dark: scheme == .dark))
+            .environment(\.calendarAccent, color)
+    }
+}
+
+extension View {
+    /// Tints with a palette color and tells views below which one it is.
+    func calendarAccent(_ color: CalColor) -> some View { modifier(CalendarAccent(color: color)) }
 }
 
 /// The kit's wording, chosen by the host. Neutral defaults (CalendarLab); a
@@ -73,7 +132,7 @@ struct CalAvatar: View {
             } else {
                 Text(initials)
                     .font(.system(size: size * 0.42, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(CalOnTint(tint))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(CalTint(tint))
             }

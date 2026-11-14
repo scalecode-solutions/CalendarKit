@@ -62,12 +62,10 @@ public struct CalendarSettingsView<Extra: View>: View {
             extra
         }
         .calendarBackdrop(engine)
-        .tint(engine.accentColor.color(dark: scheme == .dark))
+        .calendarAccent(engine.accentColor)
         .navigationTitle("Calendars")
         .navigationBarTitleDisplayMode(.inline)
     }
-
-    @Environment(\.colorScheme) private var scheme
 
     private func roleText(_ c: CalCalendar) -> String {
         switch c.role {
