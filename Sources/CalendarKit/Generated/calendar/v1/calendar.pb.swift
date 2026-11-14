@@ -653,7 +653,7 @@ public nonisolated struct Calendar_V1_SyncRequest: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  /// Calendars the client holds; others load from 0. At most 4096. A Sync
+  /// Calendars the client holds; others load from 0. At most 1024. A Sync
   /// sends a bounded amount of rows: calendars it didn't get to come back as
   /// empty deltas with has_more and the cursor unchanged.
   public var cursors: [Calendar_V1_CalendarCursor] = []
