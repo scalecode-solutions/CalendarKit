@@ -126,7 +126,8 @@ public final class CalendarEngine {
     private func openStore() {
         guard store == nil, !isWiped else { return }
         do {
-            store = try CalendarStore(userID: config.currentUserID, appGroup: config.appGroup, inMemory: storeInMemory)
+            store = try CalendarStore(userID: config.currentUserID, appGroup: config.appGroup,
+                                      directory: config.storeDirectory, inMemory: storeInMemory)
         } catch {
             log.error("store failed to open: \(error.localizedDescription, privacy: .public)")
             store = try? CalendarStore(userID: config.currentUserID, appGroup: nil, inMemory: true)

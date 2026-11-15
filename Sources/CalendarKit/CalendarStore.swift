@@ -234,7 +234,7 @@ final class CalendarStore {
     private let decoder = JSONDecoder()
 
     /// `url`: tests only, a store file of their own.
-    init(userID: UUID, appGroup: String?, inMemory: Bool = false, url: URL? = nil) throws {
+    init(userID: UUID, appGroup: String?, directory: URL? = nil, inMemory: Bool = false, url: URL? = nil) throws {
         let schema = Schema(versionedSchema: CalendarSchemaV2.self)
         let name = "Calendar-\(userID.uuidString)"
         let config: ModelConfiguration
@@ -242,6 +242,9 @@ final class CalendarStore {
             config = ModelConfiguration(name, schema: schema, url: url)
         } else if inMemory {
             config = ModelConfiguration(name, schema: schema, isStoredInMemoryOnly: true)
+        } else if let directory {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            config = ModelConfiguration(name, schema: schema, url: directory.appending(path: "\(name).store"))
         } else if let appGroup,
                   let base = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) {
             config = ModelConfiguration(name, schema: schema, url: base.appending(path: "\(name).store"))

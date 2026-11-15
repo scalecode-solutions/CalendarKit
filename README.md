@@ -10,8 +10,10 @@ Status: **0.5** (MVCALE-15): engine, sync, offline writes, and the views, runnin
 
 ## Using it (so far)
 
-- **`CalendarConfig(baseURL:currentUserID:tokenProvider:appGroup:refreshInterval:)`**
-  is the injection seam.
+- **`CalendarConfig(baseURL:currentUserID:tokenProvider:appGroup:storeDirectory:refreshInterval:)`**
+  is the injection seam. `storeDirectory` puts the local store in a folder the
+  host chooses (for example one it keeps out of device backups); the kit creates
+  it and keeps `Calendar-<user id>.store` there.
 - **`CalendarTransport`** is a protocol, so tests and previews can fake the
   server; `ConnectCalendarTransport` is the real one. Errors come back as
   `CalTransportError`, sorted by what to do: `isRetryable` (unavailable, slow
