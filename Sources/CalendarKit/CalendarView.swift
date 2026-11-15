@@ -172,6 +172,10 @@ public struct CalendarView: View {
     private func grid(_ index: [CalDate: [CalOccurrence]]) -> some View {
         VStack(spacing: 2) {
             ForEach(layout.weeks, id: \.first) { week in
+                // A faint rule above every week but the first: a day's chips
+                // sit at the bottom of its cell, right over the next week's
+                // numbers, and without it they read as the next week's.
+                if week.first != layout.weeks.first?.first { WeekRule() }
                 HStack(spacing: 0) {
                     ForEach(week, id: \.self) { day in
                         let occ = index[day] ?? []
@@ -453,6 +457,21 @@ enum DayIndex {
             }
         }
         return out
+    }
+}
+
+/// The hairline between two weeks of the month grid, in the system's
+/// separator color (it adapts to light and dark), one pixel high.
+struct WeekRule: View {
+    @Environment(\.displayScale) private var scale
+
+    var body: some View {
+        Rectangle()
+            .fill(Color(uiColor: .separator))
+            .frame(height: 1 / scale)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 1)
+            .accessibilityHidden(true)
     }
 }
 
