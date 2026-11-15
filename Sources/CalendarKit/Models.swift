@@ -133,7 +133,8 @@ extension CalCalendar {
     /// - Each calendar left starts at a place in `autoPalette` from its owner's
     ///   id (stable across launches; Swift's `hashValue` isn't) and walks on to
     ///   the first free color, in owner-id order.
-    /// - Once every color is taken, colors repeat (from the id alone).
+    /// - Once every color is taken, colors repeat: a calendar keeps the one it
+    ///   had, else takes its id's slot.
     static func assignAutoColors(_ cals: [CalCalendar]) -> [CalCalendar] {
         var out = cals
         var taken: Set<CalColor> = []
@@ -165,8 +166,11 @@ extension CalCalendar {
         for i in newcomers {
             let start = stableIndex(out[i].ownerID, n)
             let walk = (0..<n).lazy.map { autoPalette[(start + $0) % n] }
+            // Nothing free (more friends than colors): keep what it had, even
+            // shared, so a full palette doesn't reshuffle on every pass.
+            let had = out[i].autoColor.flatMap { autoPalette.contains($0) ? $0 : nil }
             let pick = walk.first { !taken.contains($0) && !near.contains($0) }
-                ?? walk.first { !taken.contains($0) } ?? autoPalette[start]
+                ?? walk.first { !taken.contains($0) } ?? had ?? autoPalette[start]
             out[i].autoColor = pick
             taken.insert(pick)
         }

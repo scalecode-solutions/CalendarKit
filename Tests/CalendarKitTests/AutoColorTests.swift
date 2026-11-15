@@ -96,15 +96,24 @@ struct AutoColorTests {
     /// Adding friends one at a time never recolors one already there (the
     /// review measured 7% to 39% moving without memory, from 1 to 5 friends).
     @Test func addingAFriendNeverMovesAnother() {
-        for _ in 0..<500 {
-            var cals = [cal(.owner)]
-            for _ in 0..<11 {
-                let before = Dictionary(uniqueKeysWithValues: cals.map { ($0.id, $0.displayColor) })
-                cals = CalCalendar.assignAutoColors((cals + [cal(.view)]).shuffled())
-                for c in cals where before[c.id] != nil { #expect(c.displayColor == before[c.id]) }
+        // Past 11 friends the palette is full and colors repeat; still nobody moves.
+        for own in [CalColor.none, .orange, .gray] {
+            for _ in 0..<300 {
+                var cals = [cal(.owner, color: own)]
+                for k in 1...14 {
+                    let before = Dictionary(uniqueKeysWithValues: cals.map { ($0.id, $0.displayColor) })
+                    cals = CalCalendar.assignAutoColors((cals + [cal(.view)]).shuffled())
+                    for c in cals where before[c.id] != nil { #expect(c.displayColor == before[c.id]) }
+                    // Assigning again changes nothing (else every sync would write and rebuild).
+                    #expect(Self.colors(CalCalendar.assignAutoColors(cals.shuffled())) == Self.colors(cals))
+                    if k == 11 && own != .gray { #expect(Set(cals.filter { !$0.isOwn }.map(\.displayColor)).count == 11) }
+                }
             }
-            #expect(Set(cals.filter { !$0.isOwn }.map(\.displayColor)).count == 11)
         }
+    }
+
+    private static func colors(_ cals: [CalCalendar]) -> [UUID: CalColor] {
+        Dictionary(uniqueKeysWithValues: cals.map { ($0.id, $0.displayColor) })
     }
 
     /// A remembered color gives way when it's chosen for something else, or
