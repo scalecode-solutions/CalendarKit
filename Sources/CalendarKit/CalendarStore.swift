@@ -354,8 +354,14 @@ final class CalendarStore {
 
     /// Before a full load of a calendar: forget what the server will resend
     /// (local pending changes stay).
+    ///
+    /// It only counts as a change when there were events to drop: a calendar
+    /// with nothing on the server yet is cleared on every sync, and counting
+    /// that redrew every view each time (labels are compared on their own).
     func clearForReload(_ calendarID: UUID) {
-        eventChanges += 1
+        let held = (try? context.fetchCount(FetchDescriptor<EventRecord>(
+            predicate: #Predicate { $0.calendarID == calendarID && !$0.pending }))) ?? 1
+        if held > 0 { eventChanges += 1 }
         try? context.delete(model: EventRecord.self, where: #Predicate { $0.calendarID == calendarID && !$0.pending })
         try? context.delete(model: LabelRecord.self, where: #Predicate { $0.calendarID == calendarID })
     }

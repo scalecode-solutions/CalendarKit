@@ -74,4 +74,22 @@ struct PerfTests {
         #expect(engine.revision > r)
         #expect(engine.occurrences(from: nov.0, through: nov.1).count == 2) // and the cache saw it
     }
+
+    /// Nor does one with a calendar that has nothing on it yet (a friend's new
+    /// calendar): it was cleared for a reload on every sync, and that counted
+    /// as a change each time.
+    @Test func aQuietSyncWithAnEmptyCalendarKeepsTheRevision() async {
+        let (engine, server, own) = makeEngine()
+        let empty = server.addCalendar(owner: UUID(), role: .view)
+        _ = server.externalCreate(own, allDay("x", 2026, 11, 5))
+        await engine.refresh()
+        let r = engine.revision
+        await engine.refresh()
+        await engine.refresh()
+        #expect(engine.revision == r)
+        _ = server.externalCreate(empty, allDay("y", 2026, 11, 6))
+        await engine.refresh()
+        #expect(engine.revision > r)
+        #expect(engine.occurrences(from: nov.0, through: nov.1).count == 2)
+    }
 }
