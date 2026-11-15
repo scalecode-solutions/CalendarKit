@@ -1,5 +1,4 @@
 import SwiftUI
-import UserNotifications
 import CalendarKit
 import MvAuth
 
@@ -9,7 +8,7 @@ struct ContentView: View {
     var body: some View {
         #if DEBUG
         if let dev = DevSignIn.fromEnvironment() {
-            CalendarLabHost(userID: dev.user, server: .local, tokenProvider: { dev.token }, signOut: {}, askNotifications: false)
+            CalendarLabHost(userID: dev.user, server: .local, tokenProvider: { dev.token }, signOut: {})
         } else {
             signedIn
         }
@@ -53,13 +52,10 @@ struct CalendarLabHost: View {
     let userID: String
     let server: LabServer
     let signOut: () -> Void
-    let askNotifications: Bool
     @State private var engine: CalendarEngine
     @Environment(\.scenePhase) private var phase
 
-    init(userID: String, server: LabServer, tokenProvider: @escaping @Sendable () async -> String?, signOut: @escaping () -> Void,
-         askNotifications: Bool = true) {
-        self.askNotifications = askNotifications
+    init(userID: String, server: LabServer, tokenProvider: @escaping @Sendable () async -> String?, signOut: @escaping () -> Void) {
         self.userID = userID
         self.server = server
         self.signOut = signOut
@@ -93,14 +89,11 @@ struct CalendarLabHost: View {
         }
         .task {
             engine.start()
-            if askNotifications {
-                _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
-            }
         }
         .onDisappear { engine.stop() }
         .onChange(of: phase) { _, p in
             switch p {
-            case .active: engine.start(); Task { await engine.replanReminders() }
+            case .active: engine.start()
             case .background: engine.stop()
             default: break
             }

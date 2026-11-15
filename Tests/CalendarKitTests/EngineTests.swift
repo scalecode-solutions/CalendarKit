@@ -12,9 +12,6 @@ final class FakeServer: CalendarTransport, Sendable {
         var calendars: [CalCalendar] = []
         var events: [UUID: CalEvent] = [:]
         var labels: [UUID: (CalLabel, deleted: Bool)] = [:]
-        var alerts: [UUID: CalAlert] = [:]
-        var alertsRev: Int64 = 0
-        var defaults = CalAlertDefaults()
         var offline = false
         var failNextWrite: CalTransportError?
         var writes: [String] = []
@@ -30,8 +27,7 @@ final class FakeServer: CalendarTransport, Sendable {
         /// Fail every write with this until cleared (a broken server).
         var failAllWrites: CalTransportError?
         var failedWrites = 0
-        /// The server's MaxAlertsPerSync and MaxPagesPerSync.
-        var maxAlertsPerSync = 5000
+        /// The server's MaxPagesPerSync.
         var maxPagesPerSync = 4
     }
 
@@ -122,7 +118,7 @@ final class FakeServer: CalendarTransport, Sendable {
         if d > .zero { try? await Task.sleep(for: d) }
     }
 
-    func sync(cursors: [UUID: CalCursor], alertsCursor: Int64) async throws -> CalSyncPage {
+    func sync(cursors: [UUID: CalCursor]) async throws -> CalSyncPage {
         await latency()
         return try state.withLock { s in
             if s.offline { throw CalTransportError.unavailable("offline") }
@@ -162,12 +158,7 @@ final class FakeServer: CalendarTransport, Sendable {
                                 loadFrom: more ? (cur == 0 ? c.rev : loadFrom) : 0)
             }
             let gone = cursors.keys.filter { id in !s.calendars.contains { $0.id == id } }
-            let pending = s.alerts.values.filter { $0.rev > alertsCursor }.sorted { $0.rev < $1.rev }
-            let cut = pending.count > s.maxAlertsPerSync
-            let alerts = Array(pending.prefix(s.maxAlertsPerSync))
-            return CalSyncPage(calendars: s.calendars, deltas: deltas, gone: gone,
-                               alerts: alerts, alertsRev: cut ? alerts.last!.rev : s.alertsRev,
-                               alertDefaults: s.defaults, alertsHasMore: cut)
+            return CalSyncPage(calendars: s.calendars, deltas: deltas, gone: gone)
         }
     }
 
@@ -267,27 +258,8 @@ final class FakeServer: CalendarTransport, Sendable {
             let n = CalEvent(id: newID, calendarID: m.calendarID, fields: fields, masterID: nil, originalStart: nil, cancelled: false,
                              createdBy: s.me, updatedBy: s.me, createdAt: Date(), updatedAt: Date(), rev: rev, deleted: false)
             s.events[newID] = n
-            // As the server: the reminders follow when all-day/timed matches.
-            if fields.when.isAllDay == m.fields.when.isAllDay, let a = s.alerts[masterID] {
-                s.alertsRev += 1
-                s.alerts[newID] = CalAlert(eventID: newID, minutesBefore: a.minutesBefore, rev: s.alertsRev)
-            }
             return try answer(&s, (m, n))
         }
-    }
-
-    func setAlerts(eventID: UUID, minutesBefore: [Int]) async throws -> CalAlert {
-        try state.withLock { s in
-            try gate(&s, "alerts")
-            s.alertsRev += 1
-            let a = CalAlert(eventID: eventID, minutesBefore: minutesBefore, rev: s.alertsRev)
-            s.alerts[eventID] = a
-            return a
-        }
-    }
-
-    func setAlertDefaults(_ d: CalAlertDefaults) async throws -> CalAlertDefaults {
-        try state.withLock { s in try gate(&s, "defaults"); s.defaults = d; return d }
     }
 
     func setCalendarPref(calendarID: UUID, visible: Bool, color: CalColor) async throws {
@@ -351,7 +323,7 @@ func makeEngine() -> (CalendarEngine, FakeServer, own: UUID) {
     let server = FakeServer(me: me)
     let own = server.addCalendar(owner: me, role: .owner)
     let engine = CalendarEngine(config: CalendarConfig(baseURL: URL(string: "http://fake")!, currentUserID: me,
-                                                       tokenProvider: { "t" }), transport: server, reminderCenter: FakeCenter())
+                                                       tokenProvider: { "t" }), transport: server)
     engine.storeInMemory = true
     return (engine, server, own)
 }
@@ -414,14 +386,15 @@ struct EngineTests {
         let (engine, server, own) = makeEngine()
         await engine.refresh()
         server.set { $0.offline = true }
-        let a = engine.addEvent(to: own, allDay("A", 2026, 11, 1))
+        _ = engine.addEvent(to: own, allDay("A", 2026, 11, 1))
         _ = engine.addEvent(to: own, allDay("B", 2026, 11, 2))
-        engine.setAlerts(for: a, minutesBefore: [900])
-        engine.setAlerts(for: a, minutesBefore: [60]) // merged: last wins
+        let mine = engine.calendars.first { $0.id == own }!
+        engine.setColor(mine, .teal)
+        engine.setColor(mine, .pink) // merged: last wins
         server.set { $0.offline = false }
         await engine.refresh()
-        #expect(server.get { $0.writes } == ["create A", "create B", "alerts"])
-        #expect(server.get { $0.alerts[a.id]?.minutesBefore } == [60])
+        #expect(server.get { $0.writes } == ["create A", "create B", "pref"])
+        #expect(server.get { $0.calendars.first { $0.id == own }?.prefColor } == .pink)
     }
 
     @Test func aLostRaceIsANoticeAndTheServerWins() async {
@@ -789,11 +762,10 @@ struct WriteChainTests {
         var f = e.fields
         f.title = "still nope"
         engine.updateEvent(engine.event(e.id)!, f) // merged into the create while offline
-        engine.setAlerts(for: engine.event(e.id)!, minutesBefore: [60])
         server.set { $0.offline = false }
         await engine.refresh()
         #expect(engine.notices.count == 1, "\(engine.notices.map(\.message))")
-        #expect(engine.pendingCount <= 1) // the alert may still go (it's the person's own)
+        #expect(engine.pendingCount == 0)
         // The create was tried once and refused; nothing built on it went out.
         let writes = server.get { $0.writes }
         #expect(writes.filter { $0.hasPrefix("create") }.count == 1)
@@ -912,29 +884,6 @@ struct FollowingCountTests {
     }
 }
 
-/// R19: reminders follow a split to the new series.
-@MainActor
-@Suite("Engine: reminders across a split", .serialized)
-struct SplitReminderTests {
-    @Test func theNewSeriesKeepsTheSeriesReminders() async {
-        let (engine, server, own) = makeEngine()
-        await engine.refresh()
-        let s = engine.addEvent(to: own, allDay("Class", 2026, 11, 2, repeating: CalRecurrence(.weekly)), alerts: [900])
-        await engine.refresh()
-        let third = engine.occurrences(from: nov.0, through: nov.1).filter { $0.seriesID == s.id }[2]
-        var f = third.event.fields
-        f.title = "Class (new room)"
-        f.when = third.when
-        engine.updateFollowing(third, f)
-        await engine.refresh()
-        let newID = engine.occurrences(from: nov.0, through: nov.1).last!.seriesID!
-        #expect(newID != s.id)
-        #expect(engine.alerts[newID] == [900])
-        #expect(server.get { $0.alerts[newID]?.minutesBefore } == [900])
-        #expect(engine.notices.isEmpty)
-    }
-}
-
 /// R28: a label deleted elsewhere reaches this device on its events too.
 @MainActor
 @Suite("Engine: label deleted elsewhere", .serialized)
@@ -1046,24 +995,6 @@ struct LifecycleTests {
         #expect(engine.occurrences(from: nov.0, through: nov.1).count == 2)
     }
 
-    @Test func signOutClearsRemindersEvenWithAReplanRunning() async {
-        let me = UUID()
-        let server = FakeServer(me: me)
-        let own = server.addCalendar(owner: me, role: .owner)
-        let center = SlowCenter()
-        let engine = CalendarEngine(config: CalendarConfig(baseURL: URL(string: "http://fake")!, currentUserID: me, tokenProvider: { "t" }),
-                                    transport: server, reminderCenter: center)
-        engine.storeInMemory = true
-        await engine.refresh()
-        let soon = Date().addingTimeInterval(3 * 3600)
-        engine.addEvent(to: own, CalEventFields(title: "Call", when: .timed(start: soon, end: soon, timeZone: TimeZone.current.identifier)), alerts: [15])
-        await engine.refresh()
-        engine.scheduleReplan()  // a replan on the (slow) center…
-        engine.wipeLocalStore()  // …and sign-out while it runs
-        try? await Task.sleep(for: .milliseconds(600))
-        #expect(center.all.isEmpty, "a reminder survived sign-out")
-    }
-
     @Test func aLocalDeleteIsntUndoneByAPageAlreadyOnItsWay() async {
         let (engine, server, own) = makeEngine()
         let e = server.externalCreate(own, allDay("Dentist", 2026, 11, 10))
@@ -1091,18 +1022,6 @@ struct LifecycleTests {
     }
 }
 
-/// A notification center that answers slowly (a replan takes a while).
-final class SlowCenter: ReminderCenter, Sendable {
-    let inner = FakeCenter()
-    func pendingIDs() async -> [String] {
-        try? await Task.sleep(for: .milliseconds(200))
-        return await inner.pendingIDs()
-    }
-    func add(_ r: CalReminder) async throws { try await inner.add(r) }
-    func remove(_ ids: [String]) async { await inner.remove(ids) }
-    var all: [CalReminder] { inner.all }
-}
-
 /// Frond's catch: signing out on a launch that never opened the store must
 /// still wipe what's on disk.
 @MainActor
@@ -1114,7 +1033,7 @@ struct ColdWipeTests {
         let own = server.addCalendar(owner: me, role: .owner)
         func engine() -> CalendarEngine {
             let e = CalendarEngine(config: CalendarConfig(baseURL: URL(string: "http://fake")!, currentUserID: me, tokenProvider: { "t" }),
-                                   transport: server, reminderCenter: FakeCenter())
+                                   transport: server)
             e.storeInMemory = false // the real on-disk store, one file per (random) user
             return e
         }

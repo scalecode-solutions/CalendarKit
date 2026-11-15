@@ -26,8 +26,7 @@ public protocol Calendar_V1_CalendarServiceClientInterface: Sendable {
     /// on first use), each with the caller's role and display preference, plus,
     /// per calendar, the events and labels changed since the caller's cursor
     /// (deletions included as tombstones). Calendars the caller had a cursor for
-    /// but can no longer see come back in `gone`. Also the caller's own alerts
-    /// changed since their alerts cursor, and their alert defaults.
+    /// but can no longer see come back in `gone`.
     @available(iOS 13, *)
     func `sync`(request: Calendar_V1_SyncRequest, headers: Connect.Headers) async -> ResponseMessage<Calendar_V1_SyncResponse>
 
@@ -53,15 +52,6 @@ public protocol Calendar_V1_CalendarServiceClientInterface: Sendable {
     /// occurrence and a new series (the client's id) starts there, in one step.
     @available(iOS 13, *)
     func `splitSeries`(request: Calendar_V1_SplitSeriesRequest, headers: Connect.Headers) async -> ResponseMessage<Calendar_V1_SplitSeriesResponse>
-
-    /// SetAlerts sets the caller's reminders for one event they can see (empty =
-    /// none). Private: nobody else sees them.
-    @available(iOS 13, *)
-    func `setAlerts`(request: Calendar_V1_SetAlertsRequest, headers: Connect.Headers) async -> ResponseMessage<Calendar_V1_SetAlertsResponse>
-
-    /// SetAlertDefaults sets the reminders the caller's new events start with.
-    @available(iOS 13, *)
-    func `setAlertDefaults`(request: Calendar_V1_SetAlertDefaultsRequest, headers: Connect.Headers) async -> ResponseMessage<Calendar_V1_SetAlertDefaultsResponse>
 
     /// SetCalendarPref sets whether a calendar the caller can see is shown, and a
     /// color override for it, on the caller's own screens.
@@ -139,16 +129,6 @@ public final class Calendar_V1_CalendarServiceClient: Calendar_V1_CalendarServic
     }
 
     @available(iOS 13, *)
-    public func `setAlerts`(request: Calendar_V1_SetAlertsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Calendar_V1_SetAlertsResponse> {
-        return await self.client.unary(path: "/calendar.v1.CalendarService/SetAlerts", idempotencyLevel: .unknown, request: request, headers: headers)
-    }
-
-    @available(iOS 13, *)
-    public func `setAlertDefaults`(request: Calendar_V1_SetAlertDefaultsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Calendar_V1_SetAlertDefaultsResponse> {
-        return await self.client.unary(path: "/calendar.v1.CalendarService/SetAlertDefaults", idempotencyLevel: .unknown, request: request, headers: headers)
-    }
-
-    @available(iOS 13, *)
     public func `setCalendarPref`(request: Calendar_V1_SetCalendarPrefRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Calendar_V1_SetCalendarPrefResponse> {
         return await self.client.unary(path: "/calendar.v1.CalendarService/SetCalendarPref", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -200,8 +180,6 @@ public final class Calendar_V1_CalendarServiceClient: Calendar_V1_CalendarServic
             public static let updateEvent = Connect.MethodSpec(name: "UpdateEvent", service: "calendar.v1.CalendarService", type: .unary)
             public static let deleteEvent = Connect.MethodSpec(name: "DeleteEvent", service: "calendar.v1.CalendarService", type: .unary)
             public static let splitSeries = Connect.MethodSpec(name: "SplitSeries", service: "calendar.v1.CalendarService", type: .unary)
-            public static let setAlerts = Connect.MethodSpec(name: "SetAlerts", service: "calendar.v1.CalendarService", type: .unary)
-            public static let setAlertDefaults = Connect.MethodSpec(name: "SetAlertDefaults", service: "calendar.v1.CalendarService", type: .unary)
             public static let setCalendarPref = Connect.MethodSpec(name: "SetCalendarPref", service: "calendar.v1.CalendarService", type: .unary)
             public static let listContacts = Connect.MethodSpec(name: "ListContacts", service: "calendar.v1.CalendarService", type: .unary)
             public static let updateCalendar = Connect.MethodSpec(name: "UpdateCalendar", service: "calendar.v1.CalendarService", type: .unary)

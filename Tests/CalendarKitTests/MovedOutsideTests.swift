@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import CalendarKit
 
-/// R10/R26: an occurrence moved outside its series' days still shows (and so
-/// still gets its reminder), found by its own days.
+/// R10/R26: an occurrence moved outside its series' days still shows, found
+/// by its own days.
 @MainActor
 @Suite("Engine: moved outside the series", .serialized)
 struct MovedOutsideTests {

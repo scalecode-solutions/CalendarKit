@@ -14,8 +14,7 @@ psql_cal() { docker exec cal-db psql -U cal -d cal -Atc "$1"; }
 wipe() {
   psql_cal "DELETE FROM grants WHERE grantee_id = '$USER_ID';
             DELETE FROM calendars WHERE owner_id = '$USER_ID'; DELETE FROM activity WHERE owner_id = '$USER_ID';
-            DELETE FROM user_state WHERE user_id = '$USER_ID'; DELETE FROM calendar_prefs WHERE user_id = '$USER_ID';
-            DELETE FROM event_alerts WHERE user_id = '$USER_ID';" >/dev/null
+            DELETE FROM calendar_prefs WHERE user_id = '$USER_ID';" >/dev/null
 }
 trap wipe EXIT
 trap "exit 130" INT TERM

@@ -34,7 +34,7 @@ struct LiveTransportTests {
     let monday9 = Date(timeIntervalSince1970: 1_794_841_200)
 
     func own(_ t: ConnectCalendarTransport) async throws -> CalCalendar {
-        let page = try await t.sync(cursors: [:], alertsCursor: 0)
+        let page = try await t.sync(cursors: [:])
         return try #require(page.calendars.first { $0.isOwn })
     }
 
@@ -61,7 +61,7 @@ struct LiveTransportTests {
         #expect(a.createdBy == live.owner)
 
         // The same events come back identical through Sync.
-        let page = try await t.sync(cursors: [:], alertsCursor: 0)
+        let page = try await t.sync(cursors: [:])
         let delta = try #require(page.deltas.first { $0.calendarID == cal.id })
         #expect(delta.events.first { $0.id == a.id }?.fields == timed)
         #expect(delta.events.first { $0.id == b.id }?.fields == lastFriday)
@@ -72,16 +72,16 @@ struct LiveTransportTests {
         let ex = try await t.createException(id: UUID(), calendarID: cal.id, masterID: a.id,
                                              originalStart: .instant(second), fields: nil, cancelled: true)
         #expect(ex.cancelled && ex.masterID == a.id && ex.originalStart == .instant(second))
-        let next = try await t.sync(cursors: [cal.id: delta.rev], alertsCursor: 0)
+        let next = try await t.sync(cursors: [cal.id: delta.rev])
         #expect(next.deltas.first?.events.map(\.id) == [ex.id])
 
         // Delete the series: the delta carries tombstones for it and its exception.
         _ = try await t.deleteEvent(id: a.id, baseRev: a.rev)
-        let after = try await t.sync(cursors: [cal.id: next.deltas.first!.rev], alertsCursor: 0)
+        let after = try await t.sync(cursors: [cal.id: next.deltas.first!.rev])
         let tomb = after.deltas.first?.events ?? []
         #expect(Set(tomb.map(\.id)) == [a.id, ex.id] && tomb.allSatisfy(\.deleted))
         try await t.deleteLabel(id: label.id)
-        let labelGone = try await t.sync(cursors: [cal.id: after.deltas.first!.rev], alertsCursor: 0)
+        let labelGone = try await t.sync(cursors: [cal.id: after.deltas.first!.rev])
         #expect(labelGone.deltas.first?.deletedLabelIDs == [label.id])
     }
 
@@ -126,26 +126,26 @@ struct LiveTransportTests {
         }
         // The partner's view of it, then revoke: the calendar is gone.
         let pc = try await own(p)
-        let seen = try await p.sync(cursors: [pc.id: 0], alertsCursor: 0)
+        let seen = try await p.sync(cursors: [pc.id: 0])
         let shared = try #require(seen.calendars.first { $0.ownerID == live.owner })
         #expect(shared.role == .edit && shared.visible)
         try await t.revokeGrant(id: g.id)
-        let gone = try await p.sync(cursors: [shared.id: 1], alertsCursor: 0)
+        let gone = try await p.sync(cursors: [shared.id: 1])
         #expect(gone.gone == [shared.id])
 
         // No token at all is notAuthenticated, without a request.
         let none = ConnectCalendarTransport(baseURL: live.base, tokenProvider: { nil })
         await #expect(throws: CalTransportError.notAuthenticated) {
-            _ = try await none.sync(cursors: [:], alertsCursor: 0)
+            _ = try await none.sync(cursors: [:])
         }
         let forged = ConnectCalendarTransport(baseURL: live.base, tokenProvider: { "a.b.c" })
         await #expect(throws: CalTransportError.notAuthenticated) {
-            _ = try await forged.sync(cursors: [:], alertsCursor: 0)
+            _ = try await forged.sync(cursors: [:])
         }
         // Nothing listening: unavailable (retryable).
         let down = ConnectCalendarTransport(baseURL: URL(string: "http://127.0.0.1:9")!, tokenProvider: { "x" })
         do {
-            _ = try await down.sync(cursors: [:], alertsCursor: 0)
+            _ = try await down.sync(cursors: [:])
             Issue.record("talked to nothing")
         } catch let err as CalTransportError {
             #expect(err.isRetryable, "\(err)")
@@ -155,16 +155,8 @@ struct LiveTransportTests {
     @Test func privateSettingsRoundTrip() async throws {
         let t = live.ownerT
         let cal = try await own(t)
-        let e = try await t.createEvent(id: UUID(), calendarID: cal.id,
-                                        fields: CalEventFields(title: "Bday", when: .allDay(start: CalDate(2026, 12, 9), end: CalDate(2026, 12, 10))))
-        let a = try await t.setAlerts(eventID: e.id, minutesBefore: [900, -540])
-        #expect(a.minutesBefore == [900, -540])
-        let d = try await t.setAlertDefaults(CalAlertDefaults(timed: [10, 60], allDay: [900]))
-        #expect(d == CalAlertDefaults(timed: [10, 60], allDay: [900]))
         try await t.setCalendarPref(calendarID: cal.id, visible: true, color: .pink)
-        let page = try await t.sync(cursors: [:], alertsCursor: a.rev - 1)
-        #expect(page.alerts.map(\.eventID) == [e.id] && page.alertsRev == a.rev)
-        #expect(page.alertDefaults == d)
+        let page = try await t.sync(cursors: [:])
         #expect(page.calendars.first { $0.isOwn }?.displayColor == .pink)
         let renamed = try await t.updateCalendar(name: "Owner", color: .blue)
         #expect(renamed.name == "Owner" && renamed.color == .blue && renamed.displayColor == .pink)
@@ -201,8 +193,7 @@ struct LiveTransportTests {
     // MARK: two real engines (owner + partner)
 
     @MainActor func engine(_ user: UUID, _ token: String) -> CalendarEngine {
-        let e = CalendarEngine(config: CalendarConfig(baseURL: live.base, currentUserID: user, tokenProvider: { token }),
-                               reminderCenter: FakeCenter())
+        let e = CalendarEngine(config: CalendarConfig(baseURL: live.base, currentUserID: user, tokenProvider: { token }))
         e.storeInMemory = true
         return e
     }

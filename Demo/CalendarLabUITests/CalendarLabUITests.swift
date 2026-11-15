@@ -172,8 +172,8 @@ final class CalendarLabUITests: XCTestCase {
     }
 
     /// The editor and the detail, screen by screen (MVCALE-7): the repeat
-    /// picker, the colour grid, the reminders row and its list, the detail's
-    /// hero. Run it once in light and once in dark for the screenshots.
+    /// picker, the colour grid, the detail's hero, and no reminders row on
+    /// either. Run it once in light and once in dark for the screenshots.
     func testEditorAndDetailTour() throws {
         XCTAssert(app.buttons["New Event"].waitForExistence(timeout: 15))
         app.buttons["New Event"].tap()
@@ -186,12 +186,10 @@ final class CalendarLabUITests: XCTestCase {
         dismissKeyboard()
         select(app.segmentedControls["Repeat"].buttons["Weekly"])
         shot("e1-editor-repeat")
-        reveal(app.buttons["Reminders"])
-        shot("e2-editor-color-reminders")
-        app.buttons["Reminders"].tap()
-        XCTAssert(app.navigationBars["Reminders"].waitForExistence(timeout: 3))
-        shot("e3-reminders-list")
-        app.navigationBars["Reminders"].buttons.firstMatch.tap() // back
+        reveal(app.buttons["Calendar's color"])
+        shot("e2-editor-color")
+        // No reminders anywhere (MVCALE-15).
+        XCTAssertFalse(app.buttons["Reminders"].exists)
         app.navigationBars["New Event"].buttons["Add"].tap()
 
         let row = app.buttons.matching(NSPredicate(format: "label CONTAINS 'UI test physio'")).firstMatch
@@ -200,6 +198,7 @@ final class CalendarLabUITests: XCTestCase {
         XCTAssert(app.navigationBars["Event"].waitForExistence(timeout: 5))
         XCTAssert(app.staticTexts["Riverside Clinic"].exists)
         shot("e4-detail")
+        XCTAssertFalse(app.buttons["Reminders"].exists)
         reveal(app.buttons["Delete Event"]).tap()
         XCTAssert(app.buttons["Delete All Future Events"].waitForExistence(timeout: 3))
         app.buttons["Delete All Future Events"].tap()

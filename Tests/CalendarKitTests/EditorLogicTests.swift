@@ -44,10 +44,8 @@ struct EditorLogicTests {
         var d = CalEventDraft(start: at(CalDate(2026, 11, 14), 0), end: at(CalDate(2026, 11, 14), 0), timeZone: zone)
         d.allDay = true
         d.title = "x"
-        d.alerts = [900]
         d.setAllDay(false, now: earlier)
         #expect(d.start == at(CalDate(2026, 11, 14), 9) && d.end == at(CalDate(2026, 11, 14), 10))
-        #expect(d.alerts == nil)
         guard case .success(let f) = d.fields(), case .timed(let s, let e, _) = f.when else { Issue.record("fields"); return }
         #expect(e.timeIntervalSince(s) == 3600)
     }
@@ -67,12 +65,10 @@ struct EditorLogicTests {
         #expect(d.start == at(CalDate(2026, 11, 14), 16))
     }
 
-    @Test func allDayOnKeepsTheDaysAndDropsTimedReminders() {
+    @Test func allDayOnKeepsTheDays() {
         var d = CalEventDraft(start: at(CalDate(2026, 11, 14), 22), end: at(CalDate(2026, 11, 15), 0), timeZone: zone)
         d.title = "x"
-        d.alerts = [15]
         d.setAllDay(true)
-        #expect(d.alerts == nil) // 15 minutes before a time would be 23:45 the night before
         guard case .success(let f) = d.fields() else { Issue.record("fields"); return }
         #expect(f.when == .allDay(start: CalDate(2026, 11, 14), end: CalDate(2026, 11, 15))) // midnight end adds no day
     }

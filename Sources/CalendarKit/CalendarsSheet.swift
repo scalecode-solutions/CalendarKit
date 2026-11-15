@@ -5,8 +5,8 @@ private let uiLog = Logger(subsystem: "CalendarKit", category: "ui")
 
 /// Calendar settings, pushed by the host (e.g. from a gear; CalendarLab:
 /// from the account button): which calendars to show and in what color; for
-/// your own calendar its name, labels, who it's shared with, and its history;
-/// your default reminders. The host appends its own sections through `extra`.
+/// your own calendar its name, labels, who it's shared with, and its history.
+/// The host appends its own sections through `extra`.
 public struct CalendarSettingsView<Extra: View>: View {
     @Bindable var engine: CalendarEngine
     let extra: Extra
@@ -18,7 +18,7 @@ public struct CalendarSettingsView<Extra: View>: View {
 
     public var body: some View {
         List {
-            Section("Show") {
+            Section {
                 ForEach(engine.calendars) { c in
                     HStack(spacing: 10) {
                         CalAvatar(contact: engine.owner(of: c), fallbackName: engine.displayName(c), tint: c.displayColor, size: 28)
@@ -41,6 +41,15 @@ public struct CalendarSettingsView<Extra: View>: View {
                             .labelsHidden()
                     }
                 }
+            } header: {
+                Text("Show")
+            } footer: {
+                // Sync status sits under the list it's about.
+                if engine.pendingCount > 0 {
+                    Text("\(engine.pendingCount) change\(engine.pendingCount == 1 ? "" : "s") waiting to sync.")
+                } else if let e = engine.lastError {
+                    Text(e)
+                }
             }
             if let own = engine.ownCalendar {
                 Section("My calendar") {
@@ -48,15 +57,6 @@ public struct CalendarSettingsView<Extra: View>: View {
                     NavigationLink("Labels") { LabelsView(engine: engine).calendarAccent(engine.accentColor) }
                     NavigationLink("Sharing") { SharingView(engine: engine).calendarAccent(engine.accentColor) }
                     NavigationLink("Activity") { ActivityView(engine: engine).calendarAccent(engine.accentColor) }
-                }
-            }
-            Section {
-                NavigationLink("Default reminders") { DefaultRemindersView(engine: engine).calendarAccent(engine.accentColor) }
-            } footer: {
-                if engine.pendingCount > 0 {
-                    Text("\(engine.pendingCount) change\(engine.pendingCount == 1 ? "" : "s") waiting to sync.")
-                } else if let e = engine.lastError {
-                    Text(e)
                 }
             }
             extra
@@ -341,31 +341,6 @@ struct ActivityView: View {
         } catch {
             self.error = "Couldn't load activity."
         }
-    }
-}
-
-struct DefaultRemindersView: View {
-    @Bindable var engine: CalendarEngine
-
-    var body: some View {
-        Form {
-            Section("Timed events") {
-                AlertsPicker(allDay: false, selection: Binding(get: { engine.alertDefaults.timed }, set: {
-                    engine.setAlertDefaults(CalAlertDefaults(timed: $0, allDay: engine.alertDefaults.allDay))
-                }))
-            }
-            Section {
-                AlertsPicker(allDay: true, selection: Binding(get: { engine.alertDefaults.allDay }, set: {
-                    engine.setAlertDefaults(CalAlertDefaults(timed: engine.alertDefaults.timed, allDay: $0))
-                }))
-            } header: {
-                Text("All-day events")
-            } footer: {
-                Text("New events you add start with these. Reminders are yours alone: nobody you share with sees them.")
-            }
-        }
-        .calendarBackdrop(engine)
-        .navigationTitle("Default reminders")
     }
 }
 

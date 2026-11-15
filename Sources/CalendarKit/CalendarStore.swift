@@ -18,11 +18,58 @@ enum CalendarSchemaV1: VersionedSchema {
         [CalendarRecord.self, EventRecord.self, LabelRecord.self, AlertRecord.self,
          SyncStateRecord.self, PendingWriteRecord.self]
     }
+
+    // Frozen as they shipped in V1. Reminders were removed (MVCALE-15): V2
+    // drops AlertRecord, and SyncStateRecord's alerts cursor and defaults.
+
+    @Model
+    final class AlertRecord {
+        @Attribute(.unique) var eventID: UUID
+        var payload: Data
+
+        init(eventID: UUID, payload: Data) {
+            self.eventID = eventID
+            self.payload = payload
+        }
+    }
+
+    @Model
+    final class SyncStateRecord {
+        var alertsCursor: Int64
+        var defaults: Data
+        var lastSync: Date?
+
+        init(alertsCursor: Int64, defaults: Data) {
+            self.alertsCursor = alertsCursor
+            self.defaults = defaults
+        }
+    }
+}
+
+/// V2: no reminders (MVCALE-15).
+enum CalendarSchemaV2: VersionedSchema {
+    static let versionIdentifier = Schema.Version(2, 0, 0)
+    static var models: [any PersistentModel.Type] {
+        [CalendarRecord.self, EventRecord.self, LabelRecord.self, SyncStateRecord.self, PendingWriteRecord.self]
+    }
 }
 
 enum CalendarMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [any VersionedSchema.Type] { [CalendarSchemaV1.self] }
-    static var stages: [MigrationStage] { [] }
+    static var schemas: [any VersionedSchema.Type] { [CalendarSchemaV1.self, CalendarSchemaV2.self] }
+    static var stages: [MigrationStage] { [v1ToV2] }
+
+    /// Reminder writes still queued from V1 can't be sent any more (the
+    /// server has no such call) and no longer decode, so they'd sit in the
+    /// queue forever: drop them before the tables go.
+    static var v1ToV2: MigrationStage { .custom(
+        fromVersion: CalendarSchemaV1.self, toVersion: CalendarSchemaV2.self,
+        willMigrate: { context in
+            for r in try context.fetch(FetchDescriptor<PendingWriteRecord>()) where PendingWrite.isRemovedReminderWrite(r.payload) {
+                context.delete(r)
+            }
+            try context.save()
+        },
+        didMigrate: nil) }
 }
 
 @Model
@@ -100,28 +147,12 @@ final class LabelRecord {
     }
 }
 
-@Model
-final class AlertRecord {
-    @Attribute(.unique) var eventID: UUID
-    var payload: Data      // CalAlert
-
-    init(eventID: UUID, payload: Data) {
-        self.eventID = eventID
-        self.payload = payload
-    }
-}
-
-/// One row: the alerts cursor and the person's alert defaults.
+/// One row: when this device last synced.
 @Model
 final class SyncStateRecord {
-    var alertsCursor: Int64
-    var defaults: Data     // CalAlertDefaults
     var lastSync: Date?
 
-    init(alertsCursor: Int64, defaults: Data) {
-        self.alertsCursor = alertsCursor
-        self.defaults = defaults
-    }
+    init() {}
 }
 
 /// A write made on this device, not yet confirmed by the server. Replayed in
@@ -157,12 +188,17 @@ enum PendingWrite: Codable, Equatable, Sendable {
     case delete(id: UUID, baseRev: Int64, calendarID: UUID? = nil)
     /// discardNew: "delete this and all future" (the tail is deleted at once).
     case split(masterID: UUID, baseRev: Int64, at: CalOriginalStart, newSeries: CalEvent, discardNew: Bool)
-    case alerts(eventID: UUID, minutes: [Int])
-    case alertDefaults(CalAlertDefaults)
     case pref(calendarID: UUID, visible: Bool, color: CalColor)
     case saveLabel(CalLabel)
     case deleteLabel(id: UUID, calendarID: UUID)
     case updateCalendar(name: String?, color: CalColor?)
+
+    /// A V1 queue row for a reminder write (`alerts` / `alertDefaults`, the
+    /// cases removed in MVCALE-15), by its encoded case name.
+    static func isRemovedReminderWrite(_ payload: Data) -> Bool {
+        guard let o = try? JSONSerialization.jsonObject(with: payload) as? [String: Any], o.count == 1 else { return false }
+        return o.keys.first == "alerts" || o.keys.first == "alertDefaults"
+    }
 
     /// The event this write is about, if any (to mark it pending).
     var eventID: UUID? {
@@ -197,11 +233,14 @@ final class CalendarStore {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    init(userID: UUID, appGroup: String?, inMemory: Bool = false) throws {
-        let schema = Schema(versionedSchema: CalendarSchemaV1.self)
+    /// `url`: tests only, a store file of their own.
+    init(userID: UUID, appGroup: String?, inMemory: Bool = false, url: URL? = nil) throws {
+        let schema = Schema(versionedSchema: CalendarSchemaV2.self)
         let name = "Calendar-\(userID.uuidString)"
         let config: ModelConfiguration
-        if inMemory {
+        if let url {
+            config = ModelConfiguration(name, schema: schema, url: url)
+        } else if inMemory {
             config = ModelConfiguration(name, schema: schema, isStoredInMemoryOnly: true)
         } else if let appGroup,
                   let base = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) {
@@ -418,37 +457,13 @@ final class CalendarStore {
         try? context.delete(model: LabelRecord.self, where: #Predicate { $0.id == id })
     }
 
-    // MARK: alerts + state
-
-    func alerts() -> [UUID: [Int]] {
-        let rows = (try? context.fetch(FetchDescriptor<AlertRecord>())) ?? []
-        return Dictionary(uniqueKeysWithValues: rows.compactMap { r in decode(CalAlert.self, r.payload).map { (r.eventID, $0.minutesBefore) } })
-    }
-
-    func putAlert(_ a: CalAlert) {
-        let id = a.eventID
-        if let r = try? context.fetch(FetchDescriptor<AlertRecord>(predicate: #Predicate { $0.eventID == id })).first {
-            r.payload = encode(a)
-        } else {
-            context.insert(AlertRecord(eventID: a.eventID, payload: encode(a)))
-        }
-    }
+    // MARK: state
 
     private func state() -> SyncStateRecord {
         if let s = try? context.fetch(FetchDescriptor<SyncStateRecord>()).first { return s }
-        let s = SyncStateRecord(alertsCursor: 0, defaults: encode(CalAlertDefaults()))
+        let s = SyncStateRecord()
         context.insert(s)
         return s
-    }
-
-    var alertsCursor: Int64 {
-        get { state().alertsCursor }
-        set { state().alertsCursor = newValue }
-    }
-
-    var alertDefaults: CalAlertDefaults {
-        get { decode(CalAlertDefaults.self, state().defaults) ?? CalAlertDefaults() }
-        set { state().defaults = encode(newValue) }
     }
 
     var lastSync: Date? {
@@ -502,7 +517,6 @@ final class CalendarStore {
         try? context.delete(model: CalendarRecord.self)
         try? context.delete(model: EventRecord.self)
         try? context.delete(model: LabelRecord.self)
-        try? context.delete(model: AlertRecord.self)
         try? context.delete(model: SyncStateRecord.self)
         try? context.delete(model: PendingWriteRecord.self)
         save()

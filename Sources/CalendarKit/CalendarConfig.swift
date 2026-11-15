@@ -13,27 +13,19 @@ public struct CalendarConfig: Sendable {
     public let appGroup: String?
     /// How often the calendar refreshes while it's on screen.
     public let refreshInterval: Duration
-    /// Schedule local notifications for reminders. The host asks for
-    /// notification permission; without it nothing shows.
-    public let remindersEnabled: Bool
-    /// How many pending notifications the kit may hold. iOS allows 64 per app,
-    /// shared with the host's own.
-    public let reminderBudget: Int
+    // No reminders or notifications of any kind (MVCALE-15): nothing on this
+    // calendar announces itself outside the app.
 
     public init(baseURL: URL,
                 currentUserID: UUID,
                 tokenProvider: @escaping @Sendable () async -> String?,
                 appGroup: String? = nil,
-                refreshInterval: Duration = .seconds(20),
-                remindersEnabled: Bool = true,
-                reminderBudget: Int = 32) {
+                refreshInterval: Duration = .seconds(20)) {
         self.baseURL = baseURL
         self.currentUserID = currentUserID
         self.tokenProvider = tokenProvider
         self.appGroup = appGroup
         self.refreshInterval = refreshInterval
-        self.remindersEnabled = remindersEnabled
-        self.reminderBudget = reminderBudget
     }
 
     /// The live transport — Connect/protobuf against mvCalendar.

@@ -26,9 +26,7 @@ mint() { (cd "$SERVER" && go run ./cmd/minttoken "$KEY" "$1"); }
 wipe() {
   psql_cal "DELETE FROM calendars WHERE owner_id IN ('$OWNER', '$PARTNER');
             DELETE FROM activity WHERE owner_id IN ('$OWNER', '$PARTNER');
-            DELETE FROM user_state WHERE user_id IN ('$OWNER', '$PARTNER');
-            DELETE FROM calendar_prefs WHERE user_id IN ('$OWNER', '$PARTNER');
-            DELETE FROM event_alerts WHERE user_id IN ('$OWNER', '$PARTNER');" >/dev/null
+            DELETE FROM calendar_prefs WHERE user_id IN ('$OWNER', '$PARTNER');" >/dev/null
 }
 trap wipe EXIT
 trap "exit 130" INT TERM

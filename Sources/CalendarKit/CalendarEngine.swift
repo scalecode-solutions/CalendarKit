@@ -39,9 +39,6 @@ public final class CalendarEngine {
     public private(set) var notices: [CalNotice] = []
     /// Writes waiting for the server.
     public private(set) var pendingCount = 0
-    public private(set) var alertDefaults = CalAlertDefaults()
-    /// The person's reminders, by event.
-    public private(set) var alerts: [UUID: [Int]] = [:]
     /// Bumped on every change to cached data: views re-query occurrences on it.
     public private(set) var revision = 0
     /// Names and avatars of the person's friends (and themselves), from the
@@ -61,49 +58,9 @@ public final class CalendarEngine {
     /// Tests use an in-memory store.
     var storeInMemory = false
 
-    private let reminders: ReminderScheduler
-    /// How far ahead reminders are planned.
-    var reminderHorizonDays = 35
-
-    public init(config: CalendarConfig, transport: (any CalendarTransport)? = nil,
-                reminderCenter: (any ReminderCenter)? = nil) {
+    public init(config: CalendarConfig, transport: (any CalendarTransport)? = nil) {
         self.config = config
         self.transport = transport ?? config.transport
-        self.reminders = ReminderScheduler(center: reminderCenter ?? SystemReminderCenter())
-    }
-
-    /// The reminder replan running now, if any (tests await it).
-    private(set) var replanTask: Task<Void, Never>?
-    private var replanAgain = false
-
-    /// Re-plan reminders without holding up the caller. The notification center
-    /// can wait a long time (a permission prompt still up): a sync must never
-    /// wait on it. One replan at a time; a request during one runs once more after.
-    func scheduleReplan() {
-        guard replanTask == nil else { replanAgain = true; return }
-        replanTask = Task { [weak self] in
-            repeat {
-                self?.replanAgain = false
-                await self?.replanReminders()
-            } while self?.replanAgain == true
-            self?.replanTask = nil
-        }
-    }
-
-    /// Re-plan local reminders from the cache (after every sync; hosts also
-    /// call it when the app comes to the foreground).
-    public func replanReminders(now: Date = Date()) async {
-        guard config.remindersEnabled, store != nil, !isWiped else { return }
-        let zone = TimeZone.current
-        let today = CalDate(now, in: zone)
-        let plan = ReminderPlanner.plan(occurrences: occurrences(from: today.adding(days: -1),
-                                                                 through: today.adding(days: reminderHorizonDays), zone: zone),
-                                        alerts: alerts, now: now, zone: zone, budget: config.reminderBudget,
-                                        me: config.currentUserID, defaults: alertDefaults)
-        log.debug("reminders: planning \(plan.count, privacy: .public)")
-        guard !isWiped else { return }
-        let (added, removed) = await reminders.apply(plan)
-        log.debug("reminders: +\(added, privacy: .public) -\(removed, privacy: .public)")
     }
 
     public var ownCalendar: CalCalendar? { calendars.first(where: \.isOwn) }
@@ -135,7 +92,7 @@ public final class CalendarEngine {
     }
 
     /// Set by wipeLocalStore(), cleared by start(): after a sign-out nothing
-    /// still in flight may refresh, write to the cache or plan reminders, or
+    /// still in flight may refresh or write to the cache, or
     /// the signed-out person's calendar comes back (R16).
     private(set) var isWiped = false
     /// Bumped by wipeLocalStore(): a write that lands afterwards mustn't touch
@@ -146,11 +103,6 @@ public final class CalendarEngine {
     public func wipeLocalStore() {
         stop()
         wipes += 1
-        // Clear reminders after any replan already running, so it can't add
-        // them back behind the clear (R15, R40).
-        let r = reminders, running = replanTask
-        replanTask = nil
-        Task { await running?.value; await r.clear() }
         // Open (if this launch never did) and wipe BEFORE marking the engine
         // signed out: openStore() refuses once isWiped is set, and a sign-out
         // that never opened the store left the last person's cache on disk.
@@ -160,7 +112,6 @@ public final class CalendarEngine {
         isWiped = true
         calendars = []
         labels = []
-        alerts = [:]
         people = [:]
         peopleLoadedAt = nil
         notices = []
@@ -202,10 +153,6 @@ public final class CalendarEngine {
         let visible = Set(cals.map(\.id))
         let ls = store.labels().filter { visible.contains($0.calendarID) }
         if ls != labels { labels = ls; changed = true }
-        let al = store.alerts()
-        if al != alerts { alerts = al; changed = true }
-        let defaults = store.alertDefaults
-        if defaults != alertDefaults { alertDefaults = defaults; changed = true }
         let pc = store.pendingCount
         if pc != pendingCount { pendingCount = pc; changed = true }
         if changed { revision += 1 }
@@ -286,13 +233,6 @@ public final class CalendarEngine {
 
     public func calendar(_ id: UUID) -> CalCalendar? { calendars.first { $0.id == id } }
 
-    /// The reminders in effect for an occurrence (what the planner schedules
-    /// and what a detail view should show): explicit ones, else the person's
-    /// defaults for events someone else added.
-    public func effectiveAlerts(for o: CalOccurrence) -> [Int] {
-        ReminderPlanner.effective(o, alerts: alerts, me: config.currentUserID, defaults: alertDefaults)
-    }
-
     public func labels(of calendarID: UUID) -> [CalLabel] { labels.filter { $0.calendarID == calendarID } }
 
     // MARK: refresh
@@ -321,21 +261,20 @@ public final class CalendarEngine {
         guard gen == generation, let store else { return }
         do {
             for _ in 0..<200 { // pages
-                let page = try await transport.sync(cursors: store.cursors(), alertsCursor: store.alertsCursor)
+                let page = try await transport.sync(cursors: store.cursors())
                 guard gen == generation else { return }
                 apply(page, to: store)
                 store.save()
                 publish()
-                // More of a calendar (or calendars the server didn't get to),
-                // or more alerts: ask again.
-                if !page.deltas.contains(where: \.hasMore) && !page.alertsHasMore { break }
+                // More of a calendar (or calendars the server didn't get to):
+                // ask again.
+                if !page.deltas.contains(where: \.hasMore) { break }
             }
             store.lastSync = Date()
             store.save()
             lastError = nil
             loadState = .loaded
             await loadPeopleIfStale()
-            scheduleReplan()
         } catch let e as CalTransportError {
             guard gen == generation else { return }
             lastError = Self.describe(e)
@@ -379,11 +318,6 @@ public final class CalendarEngine {
             // (loadFrom ≤ rev, so the server only judges purges more strictly).
             store.setCursor(d.calendarID, d.rev, loadFrom: d.loadFrom)
         }
-        for a in page.alerts { store.putAlert(a) }
-        // The server's cursor is right even when it cut the list (it's then the
-        // last alert sent), so no guessing from a count (R58, R66).
-        store.alertsCursor = page.alertsRev
-        store.alertDefaults = page.alertDefaults
     }
 
     // MARK: the write queue
@@ -474,8 +408,6 @@ public final class CalendarEngine {
                 store.replacePending(qpid, with: .delete(id: qid, baseRev: rev, calendarID: cal)); waiting = true
             case .split(let m, _, let at, let ns, let discard) where m == id:
                 store.replacePending(qpid, with: .split(masterID: m, baseRev: rev, at: at, newSeries: ns, discardNew: discard)); waiting = true
-            case .alerts:
-                break // the person's reminders aren't event fields
             default:
                 if q.eventID == id { waiting = true }
             }
@@ -530,10 +462,6 @@ public final class CalendarEngine {
             } else {
                 landed(r.new, after: pid, store: store)
             }
-        case .alerts(let id, let minutes):
-            store.putAlert(try live(try await transport.setAlerts(eventID: id, minutesBefore: minutes)))
-        case .alertDefaults(let d):
-            store.alertDefaults = try live(try await transport.setAlertDefaults(d))
         case .pref(let id, let visible, let color):
             try await transport.setCalendarPref(calendarID: id, visible: visible, color: color)
         case .saveLabel(let l):
@@ -625,12 +553,8 @@ public final class CalendarEngine {
                 store.dropPending(pid)
             }
             if sawCreate { return } // never reached the server: nothing to delete there
-        case .alerts(let id, _):
-            for (pid, q) in queued { if case .alerts(id, _) = q { store.replacePending(pid, with: w); return } }
         case .pref(let id, _, _):
             for (pid, q) in queued { if case .pref(id, _, _) = q { store.replacePending(pid, with: w); return } }
-        case .alertDefaults:
-            for (pid, q) in queued { if case .alertDefaults = q { store.replacePending(pid, with: w); return } }
         default: break
         }
         store.enqueue(w)
@@ -659,16 +583,12 @@ public final class CalendarEngine {
     // MARK: writing events
 
     /// Add an event (or a series) to a calendar the person may write to.
-    /// `alerts`: the person's reminders for it; nil = their defaults (timed or
-    /// all-day), [] = none.
     @discardableResult
-    public func addEvent(to calendarID: UUID, _ fields: CalEventFields, alerts minutes: [Int]? = nil) -> CalEvent {
+    public func addEvent(to calendarID: UUID, _ fields: CalEventFields) -> CalEvent {
         openStore() // a write before the first refresh must not be lost
         let e = newEvent(calendarID: calendarID, fields: fields)
         store?.put(e, pending: true)
         commit(.create(e))
-        let chosen = minutes ?? (fields.when.isAllDay ? alertDefaults.allDay : alertDefaults.timed)
-        if !chosen.isEmpty { setAlerts(for: e, minutesBefore: chosen) }
         return e
     }
 
@@ -755,14 +675,6 @@ public final class CalendarEngine {
         store.put(old, pending: true)
         store.put(newSeries, pending: true)
         commit(.split(masterID: series.id, baseRev: series.rev, at: original, newSeries: newSeries, discardNew: false))
-        // Everyone's reminders follow the split on the server (it copies them
-        // in the same transaction, when all-day/timed matches). Show ours at
-        // once; the next sync brings the server's copy.
-        if let minutes = store.alerts()[series.id], f.when.isAllDay == series.fields.when.isAllDay {
-            store.putAlert(CalAlert(eventID: newSeries.id, minutesBefore: minutes, rev: 0))
-            store.save()
-            publish()
-        }
     }
 
     /// Delete this and every later occurrence (earlier ones, and their
@@ -809,19 +721,6 @@ public final class CalendarEngine {
     }
 
     // MARK: private settings
-
-    public func setAlerts(for event: CalEvent, minutesBefore: [Int]) {
-        openStore() // a write before the first refresh must not be lost
-        guard let store else { return }
-        store.putAlert(CalAlert(eventID: event.id, minutesBefore: minutesBefore, rev: 0))
-        commit(.alerts(eventID: event.id, minutes: minutesBefore))
-    }
-
-    public func setAlertDefaults(_ d: CalAlertDefaults) {
-        openStore() // a write before the first refresh must not be lost
-        store?.alertDefaults = d
-        commit(.alertDefaults(d))
-    }
 
     /// Show or hide a calendar on this person's screens.
     public func setVisible(_ calendar: CalCalendar, _ visible: Bool) {

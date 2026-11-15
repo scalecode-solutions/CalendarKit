@@ -3,7 +3,7 @@ import PackageDescription
 
 // CalendarKit — the shared-calendar client as a self-contained SPM: Connect
 // transport, a SwiftData cache with offline writes, the recurrence expander,
-// reminders, and the calendar UI. Talks to mvCalendar. A host app (or
+// and the calendar UI (no reminders or notifications: MVCALE-15). Talks to mvCalendar. A host app (or
 // CalendarLab) adds a thin wrapper that supplies identity + a token.
 //
 // Mirrors GarageKit's shape: the kit never owns login — the host injects a

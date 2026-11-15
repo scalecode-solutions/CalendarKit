@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// One event (or occurrence): when, repeats, whose, label, where, notes, my
-/// reminders; edit and delete for people who may write.
+/// One event (or occurrence): when, repeats, whose, label, where, notes;
+/// edit and delete for people who may write.
 struct EventDetailView: View {
     let engine: CalendarEngine
     let occurrence: CalOccurrence
@@ -77,13 +77,6 @@ struct EventDetailView: View {
                 Section {
                     DetailRow(icon: "text.alignleft") { Text(event.fields.notes) }
                 }
-            }
-            Section {
-                RemindersRow(allDay: occurrence.isAllDay,
-                             selection: Binding(get: { engine.effectiveAlerts(for: occurrence) },
-                                                set: { engine.setAlerts(for: series ?? event, minutesBefore: $0) }))
-            } footer: {
-                Text("Only you get these.")
             }
             if canWrite {
                 Section {
@@ -189,26 +182,6 @@ struct DetailRow<Content: View>: View {
     }
 }
 
-/// One row saying which reminders are set, opening the list (instead of nine
-/// toggles inline).
-struct RemindersRow: View {
-    let allDay: Bool
-    @Binding var selection: [Int]
-
-    var body: some View {
-        NavigationLink {
-            List { AlertsPicker(allDay: allDay, selection: $selection) }
-                .navigationTitle("Reminders")
-                .navigationBarTitleDisplayMode(.inline)
-        } label: {
-            DetailRow(icon: "bell") {
-                LabeledContent("Reminders", value: AlertsPicker.summary(selection, allDay: allDay))
-            }
-        }
-        .accessibilityIdentifier("Reminders")
-    }
-}
-
 enum EventText {
     /// One end of the hero: the day in small type, the time (or "All day") big.
     struct Stamp: Equatable { let day: String; let big: String }
@@ -269,38 +242,6 @@ enum EventText {
                 out += " (\(zone.localizedName(for: .shortGeneric, locale: .current) ?? tz))"
             }
             return out
-        }
-    }
-}
-
-/// Reminder choices as toggles.
-struct AlertsPicker: View {
-    let allDay: Bool
-    @Binding var selection: [Int]
-
-    nonisolated static let timedChoices: [(Int, String)] = [(0, "At time of event"), (5, "5 minutes before"), (15, "15 minutes before"),
-                                                (30, "30 minutes before"), (60, "1 hour before"), (120, "2 hours before"),
-                                                (1440, "1 day before"), (2880, "2 days before"), (10080, "1 week before")]
-    nonisolated static let allDayChoices: [(Int, String)] = [(-540, "On the day (9 AM)"), (900, "1 day before (9 AM)"),
-                                                 (2340, "2 days before (9 AM)"), (9540, "1 week before (9 AM)")]
-
-    /// The row's value: "None", one or two reminders by name, or "3 reminders".
-    nonisolated static func summary(_ minutes: [Int], allDay: Bool) -> String {
-        if minutes.isEmpty { return "None" }
-        let names = minutes.sorted().map { m in
-            (allDay ? allDayChoices : timedChoices).first { $0.0 == m }?.1 ?? "\(m) minutes before"
-        }
-        return names.count <= 2 ? names.joined(separator: ", ") : "\(names.count) reminders"
-    }
-
-    var body: some View {
-        ForEach(allDay ? Self.allDayChoices : Self.timedChoices, id: \.0) { m, title in
-            Toggle(title, isOn: Binding(get: { selection.contains(m) }, set: { on in
-                var s = selection.filter { $0 != m }
-                if on && s.count < 5 { s.append(m) }
-                selection = s.sorted()
-            }))
-            .disabled(!selection.contains(m) && selection.count >= 5)
         }
     }
 }

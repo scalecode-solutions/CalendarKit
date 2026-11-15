@@ -1,7 +1,7 @@
 import Foundation
 
 /// Shared date formatters. Making a DateFormatter costs tens of microseconds
-/// plus locale loading, and rows, headers and the reminder planner made one
+/// plus locale loading, and rows and headers made one
 /// per call on every rebuild (R49). DateFormatter is thread-safe to use once
 /// configured; the cache is keyed by locale too, so a language change gets
 /// fresh ones.

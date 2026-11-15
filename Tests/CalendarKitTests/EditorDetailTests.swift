@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import CalendarKit
 
-/// MVCALE-7: the repeat picker's model, the detail hero, and the reminders row.
+/// MVCALE-7: the repeat picker's model and the detail hero.
 @Suite("Editor and detail")
 struct EditorDetailTests {
     let tz = TimeZone(identifier: "America/Chicago")!
@@ -55,14 +55,6 @@ struct EditorDetailTests {
         let mon = CalDate(2026, 11, 16)
         #expect(CalRepeatSummary.text(CalRecurrence(.weekly, weekdays: [1, 3, 5]), first: mon) == "Every week on Mon, Wed and Fri")
         #expect(CalRepeatSummary.text(CalRecurrence(.weekly, weekdays: [1, 3]), first: mon) == "Every week on Monday and Wednesday")
-    }
-
-    @Test func remindersRowSummary() {
-        #expect(AlertsPicker.summary([], allDay: false) == "None")
-        #expect(AlertsPicker.summary([60], allDay: false) == "1 hour before")
-        #expect(AlertsPicker.summary([1440, 0], allDay: false) == "At time of event, 1 day before")
-        #expect(AlertsPicker.summary([0, 5, 15], allDay: false) == "3 reminders")
-        #expect(AlertsPicker.summary([900], allDay: true) == "1 day before (9 AM)")
     }
 
     @Test func heroStamps() {

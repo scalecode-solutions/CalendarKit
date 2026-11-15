@@ -598,39 +598,6 @@ public nonisolated struct Calendar_V1_EventFields: @unchecked Sendable {
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
-/// Alert is one of the caller's reminder sets, for one event.
-public nonisolated struct Calendar_V1_Alert: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var eventID: String = String()
-
-  /// Minutes before the start (all-day: before 00:00 of the first day, so 900 =
-  /// 9:00 the day before and -540 = 9:00 on the day). Empty = no reminders.
-  public var minutesBefore: [Int32] = []
-
-  public var rev: Int64 = 0
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
-public nonisolated struct Calendar_V1_AlertDefaults: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var timed: [Int32] = []
-
-  public var allDay: [Int32] = []
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
 public nonisolated struct Calendar_V1_CalendarCursor: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -657,8 +624,6 @@ public nonisolated struct Calendar_V1_SyncRequest: Sendable {
   /// sends a bounded amount of rows: calendars it didn't get to come back as
   /// empty deltas with has_more and the cursor unchanged.
   public var cursors: [Calendar_V1_CalendarCursor] = []
-
-  public var alertsCursor: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -709,28 +674,9 @@ public nonisolated struct Calendar_V1_SyncResponse: Sendable {
   /// drop these calendars and their events
   public var gone: [String] = []
 
-  public var alerts: [Calendar_V1_Alert] = []
-
-  /// next alerts_cursor (the last alert sent, when cut)
-  public var alertsRev: Int64 = 0
-
-  public var alertDefaults: Calendar_V1_AlertDefaults {
-    get {_alertDefaults ?? Calendar_V1_AlertDefaults()}
-    set {_alertDefaults = newValue}
-  }
-  /// Returns true if `alertDefaults` has been explicitly set.
-  public var hasAlertDefaults: Bool {self._alertDefaults != nil}
-  /// Clears the value of `alertDefaults`. Subsequent reads from it will return its default value.
-  public mutating func clearAlertDefaults() {self._alertDefaults = nil}
-
-  /// The alerts were cut (at the server's per-Sync cap): sync again for the rest.
-  public var alertsHasMore: Bool = false
-
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
-
-  fileprivate var _alertDefaults: Calendar_V1_AlertDefaults? = nil
 }
 
 public nonisolated struct Calendar_V1_CreateEventRequest: Sendable {
@@ -940,83 +886,6 @@ public nonisolated struct Calendar_V1_SplitSeriesResponse: Sendable {
 
   fileprivate var _oldSeries: Calendar_V1_Event? = nil
   fileprivate var _newSeries: Calendar_V1_Event? = nil
-}
-
-public nonisolated struct Calendar_V1_SetAlertsRequest: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var eventID: String = String()
-
-  public var minutesBefore: [Int32] = []
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
-public nonisolated struct Calendar_V1_SetAlertsResponse: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var alert: Calendar_V1_Alert {
-    get {_alert ?? Calendar_V1_Alert()}
-    set {_alert = newValue}
-  }
-  /// Returns true if `alert` has been explicitly set.
-  public var hasAlert: Bool {self._alert != nil}
-  /// Clears the value of `alert`. Subsequent reads from it will return its default value.
-  public mutating func clearAlert() {self._alert = nil}
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-
-  fileprivate var _alert: Calendar_V1_Alert? = nil
-}
-
-public nonisolated struct Calendar_V1_SetAlertDefaultsRequest: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var defaults: Calendar_V1_AlertDefaults {
-    get {_defaults ?? Calendar_V1_AlertDefaults()}
-    set {_defaults = newValue}
-  }
-  /// Returns true if `defaults` has been explicitly set.
-  public var hasDefaults: Bool {self._defaults != nil}
-  /// Clears the value of `defaults`. Subsequent reads from it will return its default value.
-  public mutating func clearDefaults() {self._defaults = nil}
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-
-  fileprivate var _defaults: Calendar_V1_AlertDefaults? = nil
-}
-
-public nonisolated struct Calendar_V1_SetAlertDefaultsResponse: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var defaults: Calendar_V1_AlertDefaults {
-    get {_defaults ?? Calendar_V1_AlertDefaults()}
-    set {_defaults = newValue}
-  }
-  /// Returns true if `defaults` has been explicitly set.
-  public var hasDefaults: Bool {self._defaults != nil}
-  /// Clears the value of `defaults`. Subsequent reads from it will return its default value.
-  public mutating func clearDefaults() {self._defaults = nil}
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-
-  fileprivate var _defaults: Calendar_V1_AlertDefaults? = nil
 }
 
 public nonisolated struct Calendar_V1_SetCalendarPrefRequest: Sendable {
@@ -2012,81 +1881,6 @@ nonisolated extension Calendar_V1_EventFields: SwiftProtobuf.Message, SwiftProto
   }
 }
 
-nonisolated extension Calendar_V1_Alert: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".Alert"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}event_id\0\u{3}minutes_before\0\u{1}rev\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.eventID) }()
-      case 2: try { try decoder.decodeRepeatedInt32Field(value: &self.minutesBefore) }()
-      case 3: try { try decoder.decodeSingularInt64Field(value: &self.rev) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.eventID.isEmpty {
-      try visitor.visitSingularStringField(value: self.eventID, fieldNumber: 1)
-    }
-    if !self.minutesBefore.isEmpty {
-      try visitor.visitPackedInt32Field(value: self.minutesBefore, fieldNumber: 2)
-    }
-    if self.rev != 0 {
-      try visitor.visitSingularInt64Field(value: self.rev, fieldNumber: 3)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Calendar_V1_Alert, rhs: Calendar_V1_Alert) -> Bool {
-    if lhs.eventID != rhs.eventID {return false}
-    if lhs.minutesBefore != rhs.minutesBefore {return false}
-    if lhs.rev != rhs.rev {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Calendar_V1_AlertDefaults: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".AlertDefaults"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}timed\0\u{3}all_day\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeRepeatedInt32Field(value: &self.timed) }()
-      case 2: try { try decoder.decodeRepeatedInt32Field(value: &self.allDay) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.timed.isEmpty {
-      try visitor.visitPackedInt32Field(value: self.timed, fieldNumber: 1)
-    }
-    if !self.allDay.isEmpty {
-      try visitor.visitPackedInt32Field(value: self.allDay, fieldNumber: 2)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Calendar_V1_AlertDefaults, rhs: Calendar_V1_AlertDefaults) -> Bool {
-    if lhs.timed != rhs.timed {return false}
-    if lhs.allDay != rhs.allDay {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
 nonisolated extension Calendar_V1_CalendarCursor: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CalendarCursor"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}calendar_id\0\u{1}rev\0\u{3}load_from\0")
@@ -2129,7 +1923,7 @@ nonisolated extension Calendar_V1_CalendarCursor: SwiftProtobuf.Message, SwiftPr
 
 nonisolated extension Calendar_V1_SyncRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SyncRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}cursors\0\u{3}alerts_cursor\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}cursors\0\u{b}alerts_cursor\0\u{c}\u{2}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2138,7 +1932,6 @@ nonisolated extension Calendar_V1_SyncRequest: SwiftProtobuf.Message, SwiftProto
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.cursors) }()
-      case 2: try { try decoder.decodeSingularInt64Field(value: &self.alertsCursor) }()
       default: break
       }
     }
@@ -2148,15 +1941,11 @@ nonisolated extension Calendar_V1_SyncRequest: SwiftProtobuf.Message, SwiftProto
     if !self.cursors.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.cursors, fieldNumber: 1)
     }
-    if self.alertsCursor != 0 {
-      try visitor.visitSingularInt64Field(value: self.alertsCursor, fieldNumber: 2)
-    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Calendar_V1_SyncRequest, rhs: Calendar_V1_SyncRequest) -> Bool {
     if lhs.cursors != rhs.cursors {return false}
-    if lhs.alertsCursor != rhs.alertsCursor {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -2224,7 +2013,7 @@ nonisolated extension Calendar_V1_CalendarDelta: SwiftProtobuf.Message, SwiftPro
 
 nonisolated extension Calendar_V1_SyncResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SyncResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}calendars\0\u{1}deltas\0\u{1}gone\0\u{1}alerts\0\u{3}alerts_rev\0\u{3}alert_defaults\0\u{3}alerts_has_more\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}calendars\0\u{1}deltas\0\u{1}gone\0\u{b}alerts\0\u{b}alerts_rev\0\u{b}alert_defaults\0\u{b}alerts_has_more\0\u{c}\u{4}\u{4}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2235,20 +2024,12 @@ nonisolated extension Calendar_V1_SyncResponse: SwiftProtobuf.Message, SwiftProt
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.calendars) }()
       case 2: try { try decoder.decodeRepeatedMessageField(value: &self.deltas) }()
       case 3: try { try decoder.decodeRepeatedStringField(value: &self.gone) }()
-      case 4: try { try decoder.decodeRepeatedMessageField(value: &self.alerts) }()
-      case 5: try { try decoder.decodeSingularInt64Field(value: &self.alertsRev) }()
-      case 6: try { try decoder.decodeSingularMessageField(value: &self._alertDefaults) }()
-      case 7: try { try decoder.decodeSingularBoolField(value: &self.alertsHasMore) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.calendars.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.calendars, fieldNumber: 1)
     }
@@ -2258,18 +2039,6 @@ nonisolated extension Calendar_V1_SyncResponse: SwiftProtobuf.Message, SwiftProt
     if !self.gone.isEmpty {
       try visitor.visitRepeatedStringField(value: self.gone, fieldNumber: 3)
     }
-    if !self.alerts.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.alerts, fieldNumber: 4)
-    }
-    if self.alertsRev != 0 {
-      try visitor.visitSingularInt64Field(value: self.alertsRev, fieldNumber: 5)
-    }
-    try { if let v = self._alertDefaults {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
-    } }()
-    if self.alertsHasMore != false {
-      try visitor.visitSingularBoolField(value: self.alertsHasMore, fieldNumber: 7)
-    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -2277,10 +2046,6 @@ nonisolated extension Calendar_V1_SyncResponse: SwiftProtobuf.Message, SwiftProt
     if lhs.calendars != rhs.calendars {return false}
     if lhs.deltas != rhs.deltas {return false}
     if lhs.gone != rhs.gone {return false}
-    if lhs.alerts != rhs.alerts {return false}
-    if lhs.alertsRev != rhs.alertsRev {return false}
-    if lhs._alertDefaults != rhs._alertDefaults {return false}
-    if lhs.alertsHasMore != rhs.alertsHasMore {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -2620,143 +2385,6 @@ nonisolated extension Calendar_V1_SplitSeriesResponse: SwiftProtobuf.Message, Sw
   public static func ==(lhs: Calendar_V1_SplitSeriesResponse, rhs: Calendar_V1_SplitSeriesResponse) -> Bool {
     if lhs._oldSeries != rhs._oldSeries {return false}
     if lhs._newSeries != rhs._newSeries {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Calendar_V1_SetAlertsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".SetAlertsRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}event_id\0\u{3}minutes_before\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.eventID) }()
-      case 2: try { try decoder.decodeRepeatedInt32Field(value: &self.minutesBefore) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.eventID.isEmpty {
-      try visitor.visitSingularStringField(value: self.eventID, fieldNumber: 1)
-    }
-    if !self.minutesBefore.isEmpty {
-      try visitor.visitPackedInt32Field(value: self.minutesBefore, fieldNumber: 2)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Calendar_V1_SetAlertsRequest, rhs: Calendar_V1_SetAlertsRequest) -> Bool {
-    if lhs.eventID != rhs.eventID {return false}
-    if lhs.minutesBefore != rhs.minutesBefore {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Calendar_V1_SetAlertsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".SetAlertsResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}alert\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._alert) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
-    try { if let v = self._alert {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
-    } }()
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Calendar_V1_SetAlertsResponse, rhs: Calendar_V1_SetAlertsResponse) -> Bool {
-    if lhs._alert != rhs._alert {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Calendar_V1_SetAlertDefaultsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".SetAlertDefaultsRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}defaults\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._defaults) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
-    try { if let v = self._defaults {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
-    } }()
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Calendar_V1_SetAlertDefaultsRequest, rhs: Calendar_V1_SetAlertDefaultsRequest) -> Bool {
-    if lhs._defaults != rhs._defaults {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Calendar_V1_SetAlertDefaultsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".SetAlertDefaultsResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}defaults\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._defaults) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
-    try { if let v = self._defaults {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
-    } }()
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Calendar_V1_SetAlertDefaultsResponse, rhs: Calendar_V1_SetAlertDefaultsResponse) -> Bool {
-    if lhs._defaults != rhs._defaults {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

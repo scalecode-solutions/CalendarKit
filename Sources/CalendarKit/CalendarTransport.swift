@@ -39,7 +39,7 @@ public enum CalTransportError: Error, Sendable, Equatable {
 
 /// The kit's view of the server. A protocol so tests and previews can fake it.
 public protocol CalendarTransport: Sendable {
-    func sync(cursors: [UUID: CalCursor], alertsCursor: Int64) async throws -> CalSyncPage
+    func sync(cursors: [UUID: CalCursor]) async throws -> CalSyncPage
 
     func createEvent(id: UUID, calendarID: UUID, fields: CalEventFields) async throws -> CalEvent
     /// An exception to one occurrence of a series (cancelled = removes it; then
@@ -52,8 +52,6 @@ public protocol CalendarTransport: Sendable {
     func splitSeries(masterID: UUID, baseRev: Int64, at originalStart: CalOriginalStart,
                      newID: UUID, fields: CalEventFields) async throws -> (old: CalEvent, new: CalEvent)
 
-    func setAlerts(eventID: UUID, minutesBefore: [Int]) async throws -> CalAlert
-    func setAlertDefaults(_ defaults: CalAlertDefaults) async throws -> CalAlertDefaults
     func setCalendarPref(calendarID: UUID, visible: Bool, color: CalColor) async throws
     func listContacts() async throws -> [CalContact]
 
@@ -69,8 +67,8 @@ public protocol CalendarTransport: Sendable {
 
 public extension CalendarTransport {
     /// Delta cursors only (no load in progress).
-    func sync(cursors: [UUID: Int64], alertsCursor: Int64) async throws -> CalSyncPage {
-        try await sync(cursors: cursors.mapValues { CalCursor(rev: $0) }, alertsCursor: alertsCursor)
+    func sync(cursors: [UUID: Int64]) async throws -> CalSyncPage {
+        try await sync(cursors: cursors.mapValues { CalCursor(rev: $0) })
     }
 }
 
@@ -125,7 +123,7 @@ public struct ConnectCalendarTransport: CalendarTransport {
 
     // MARK: sync
 
-    public func sync(cursors: [UUID: CalCursor], alertsCursor: Int64) async throws -> CalSyncPage {
+    public func sync(cursors: [UUID: CalCursor]) async throws -> CalSyncPage {
         var req = Calendar_V1_SyncRequest()
         req.cursors = cursors.map { id, cur in
             var c = Calendar_V1_CalendarCursor()
@@ -134,7 +132,6 @@ public struct ConnectCalendarTransport: CalendarTransport {
             c.loadFrom = cur.loadFrom
             return c
         }
-        req.alertsCursor = alertsCursor
         return try Wire.syncPage(value(await client.sync(request: req, headers: try await headers())))
     }
 
@@ -194,19 +191,6 @@ public struct ConnectCalendarTransport: CalendarTransport {
     }
 
     // MARK: private settings
-
-    public func setAlerts(eventID: UUID, minutesBefore: [Int]) async throws -> CalAlert {
-        var req = Calendar_V1_SetAlertsRequest()
-        req.eventID = Wire.id(eventID)
-        req.minutesBefore = minutesBefore.map(Int32.init)
-        return try Wire.alert(value(await client.setAlerts(request: req, headers: try await headers())).alert)
-    }
-
-    public func setAlertDefaults(_ defaults: CalAlertDefaults) async throws -> CalAlertDefaults {
-        var req = Calendar_V1_SetAlertDefaultsRequest()
-        req.defaults = Wire.defaults(defaults)
-        return Wire.defaults(try value(await client.setAlertDefaults(request: req, headers: try await headers())).defaults)
-    }
 
     public func setCalendarPref(calendarID: UUID, visible: Bool, color: CalColor) async throws {
         var req = Calendar_V1_SetCalendarPrefRequest()
@@ -424,21 +408,6 @@ enum Wire {
         CalLabel(id: try uuid(w.id), calendarID: try uuid(w.calendarID), name: w.name, color: color(w.color), rev: w.rev)
     }
 
-    static func alert(_ w: Calendar_V1_Alert) throws -> CalAlert {
-        CalAlert(eventID: try uuid(w.eventID), minutesBefore: w.minutesBefore.map(Int.init), rev: w.rev)
-    }
-
-    static func defaults(_ d: CalAlertDefaults) -> Calendar_V1_AlertDefaults {
-        var w = Calendar_V1_AlertDefaults()
-        w.timed = d.timed.map(Int32.init)
-        w.allDay = d.allDay.map(Int32.init)
-        return w
-    }
-
-    static func defaults(_ w: Calendar_V1_AlertDefaults) -> CalAlertDefaults {
-        CalAlertDefaults(timed: w.timed.map(Int.init), allDay: w.allDay.map(Int.init))
-    }
-
     static func grant(_ w: Calendar_V1_Grant) throws -> CalGrant {
         CalGrant(id: try uuid(w.id), granteeID: try uuid(w.granteeID), role: try role(w.role),
                  createdAt: date(w.createdAt), expiresAt: w.expiresAt > 0 ? date(w.expiresAt) : nil, label: w.label)
@@ -454,10 +423,6 @@ enum Wire {
                          deletedLabelIDs: try d.labels.filter(\.deleted).map { try uuid($0.id) },
                          rev: d.rev, hasMore: d.hasMore_p, reload: d.reload, loadFrom: d.loadFrom)
             },
-            gone: try w.gone.map(uuid),
-            alerts: try w.alerts.map(alert),
-            alertsRev: w.alertsRev,
-            alertDefaults: defaults(w.alertDefaults),
-            alertsHasMore: w.alertsHasMore)
+            gone: try w.gone.map(uuid))
     }
 }

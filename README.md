@@ -1,12 +1,11 @@
 # CalendarKit
 
 Swift client for **mvCalendar**: shared calendars between friends. Connect
-transport, the recurrence expander, and (in progress) a SwiftData cache with
-offline writes, reminders, and the calendar UI. The host supplies identity and
+transport, the recurrence expander, a SwiftData cache with offline writes,
+and the calendar UI. The host supplies identity and
 a token provider, and never logs in through the kit. Swift 6, iOS 26.
 
-Status: **0.1** (MVCALE-3): engine, sync, offline writes, reminders, and the
-views, running in CalendarLab against the local stack. Not yet in a host. The design lives in
+Status: **0.5** (MVCALE-15): engine, sync, offline writes, and the views, running in CalendarLab against the local stack. Not yet in a host. The design lives in
 [`mvCalendar/docs/DESIGN.md`](../mvCalendar/docs/DESIGN.md).
 
 ## Using it (so far)
@@ -26,7 +25,7 @@ views, running in CalendarLab against the local stack. Not yet in a host. The de
     the host's App Group) and pulls changes per calendar from a cursor.
   - **Writes are local at once, then queued** and replayed in order before
     every sync (`addEvent`, `updateEvent`, `deleteEvent`, `updateOccurrence`,
-    `deleteOccurrence`, `updateFollowing`, `setAlerts`, `setVisible`,
+    `deleteOccurrence`, `updateFollowing`, `setVisible`,
     `setColor`, labels). A write made offline waits; edits to something still
     waiting merge into it (create + edit = one create; create + delete =
     nothing sent).
@@ -62,13 +61,13 @@ views, running in CalendarLab against the local stack. Not yet in a host. The de
   - **`CalendarSettingsView(engine:extra:)`**: pushed by the host. Show/hide
     and recolor each calendar; your calendar's name and color, labels,
     sharing (view by default, edit as a choice, optional end date), activity;
-    your default reminders; then the host's own sections (`extra`).
+    then the host's own sections (`extra`).
   - The host starts and stops the engine (CalendarLab: on appear/disappear
-    and scene phase) and calls `replanReminders()` when the app comes forward.
-- **`ReminderPlanner` / `ReminderScheduler`**: local notifications for the
-  person's reminders, the soonest within `reminderBudget` (default 32 of iOS's
-  64 per app, shared with the host), re-planned after every sync without ever
-  holding a sync up. The host asks for notification permission.
+    and scene phase).
+- **No reminders or notifications.** The calendar never announces itself
+  outside the app: no local notifications, no badges, nothing on a lock
+  screen (MVCALE-15). A test fails if the kit or the Lab touches
+  UserNotifications.
 - **`CalRecurrenceExpander`** turns a series into dates (`dates`) or instants
   (`instants`), offline, by the rules shared with the server.
 - Types are prefixed `Cal` (`CalEvent`, `CalCalendar`, …) so nothing clashes

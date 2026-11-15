@@ -313,23 +313,6 @@ public struct CalEvent: Identifiable, Equatable, Sendable, Codable {
     public var isException: Bool { masterID != nil }
 }
 
-/// The caller's reminders for one event (minutes before the start; all-day:
-/// before 00:00 of the first day, so 900 = 9:00 the day before).
-public struct CalAlert: Equatable, Sendable, Codable {
-    public let eventID: UUID
-    public var minutesBefore: [Int]
-    public var rev: Int64
-}
-
-public struct CalAlertDefaults: Equatable, Sendable, Codable {
-    public var timed: [Int]
-    public var allDay: [Int]
-    public init(timed: [Int] = [], allDay: [Int] = []) {
-        self.timed = timed
-        self.allDay = allDay
-    }
-}
-
 /// A person the caller may share with.
 public struct CalContact: Identifiable, Equatable, Sendable {
     public let id: UUID
@@ -389,10 +372,4 @@ public struct CalSyncPage: Equatable, Sendable {
     public let calendars: [CalCalendar]
     public let deltas: [CalDelta]
     public let gone: [UUID]
-    public let alerts: [CalAlert]
-    /// The next alerts cursor (the last alert sent, when the list was cut).
-    public let alertsRev: Int64
-    public let alertDefaults: CalAlertDefaults
-    /// The alerts were cut at the server's per-Sync cap: sync again for the rest.
-    public var alertsHasMore = false
 }

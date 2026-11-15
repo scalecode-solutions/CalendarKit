@@ -160,8 +160,6 @@ public struct CalEventDraft: Equatable, Sendable {
     public var customRule = CalRecurrence(.weekly)
     public enum Ending: Equatable, Sendable { case never, on(CalDate), after(Int) }
     public var ending: Ending = .never
-    /// The person's reminders (nil = their defaults).
-    public var alerts: [Int]?
 
     public init(start: Date, end: Date, timeZone: TimeZone = .current, calendarID: UUID? = nil) {
         self.start = start
@@ -242,9 +240,7 @@ public struct CalEventDraft: Equatable, Sendable {
     /// Switch between all-day and timed, keeping the days shown (R63, R64).
     /// To timed: the next hour today, else 9:00, an hour long on a one-day
     /// event, or to the same time on the last day. To all-day: the days the
-    /// times fall on (an end at midnight doesn't add a day). Reminders chosen
-    /// for the other kind would mean something else (minutes before a time vs
-    /// before the day), so they go back to the person's defaults.
+    /// times fall on (an end at midnight doesn't add a day).
     public mutating func setAllDay(_ on: Bool, now: Date = Date()) {
         guard on != allDay else { return }
         var cal = Calendar(identifier: .gregorian)
@@ -263,7 +259,6 @@ public struct CalEventDraft: Equatable, Sendable {
                 .addingTimeInterval(3600)
         }
         allDay = on
-        alerts = nil
     }
 
     /// The fields to save, or what's wrong (the server's own limits).

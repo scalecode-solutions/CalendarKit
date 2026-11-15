@@ -15,9 +15,7 @@ struct EventEditorView: View {
         self.request = request
         switch request {
         case .new(let day):
-            var d = CalEventDraft.new(on: day, calendarID: engine.ownCalendar?.id ?? engine.writableCalendars.first?.id)
-            d.alerts = nil
-            _draft = State(initialValue: d)
+            _draft = State(initialValue: CalEventDraft.new(on: day, calendarID: engine.ownCalendar?.id ?? engine.writableCalendars.first?.id))
             isNew = true
         case .event(let e):
             _draft = State(initialValue: CalEventDraft(e.fields, calendarID: e.calendarID))
@@ -102,15 +100,6 @@ struct EventEditorView: View {
                                         : "Everyone who can see \(engine.displayName(calendar)) will see this event.")
                 }
             }
-            if isNew {
-                Section {
-                    RemindersRow(allDay: draft.allDay, selection: Binding(
-                        get: { draft.alerts ?? (draft.allDay ? engine.alertDefaults.allDay : engine.alertDefaults.timed) },
-                        set: { draft.alerts = $0 }))
-                } footer: {
-                    Text("Only you get these.")
-                }
-            }
             Section("Notes") {
                 TextField("Notes", text: $draft.notes, axis: .vertical).lineLimit(3...10)
             }
@@ -140,7 +129,7 @@ struct EventEditorView: View {
             switch request {
             case .new:
                 guard let cal = draft.calendarID else { problem = "Choose a calendar"; return }
-                engine.addEvent(to: cal, fields, alerts: draft.alerts)
+                engine.addEvent(to: cal, fields)
             case .event(let e): engine.updateEvent(e, fields)
             case .occurrence(let o): engine.updateOccurrence(o, fields)
             case .following(let o): engine.updateFollowing(o, fields)
