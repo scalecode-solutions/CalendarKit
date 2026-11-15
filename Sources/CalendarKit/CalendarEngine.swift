@@ -190,7 +190,9 @@ public final class CalendarEngine {
         guard let store else { return }
         var changed = store.eventChanges != publishedEventChanges
         publishedEventChanges = store.eventChanges
-        let cals = store.calendars().map(\.0)
+        // Automatic colors before the comparison, so an unchanged list still
+        // compares equal and doesn't rebuild the views.
+        let cals = CalCalendar.assignAutoColors(store.calendars().map(\.0))
         if cals != calendars { calendars = cals; changed = true }
         let visible = Set(cals.map(\.id))
         let ls = store.labels().filter { visible.contains($0.calendarID) }

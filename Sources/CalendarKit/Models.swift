@@ -97,9 +97,76 @@ public struct CalCalendar: Identifiable, Equatable, Sendable, Codable {
     public var visible: Bool
     public var prefColor: CalColor
 
+    /// What the engine draws it in when neither this person nor the owner chose
+    /// a color: one apart from the person's own and the other calendars', from
+    /// the owner's id (`CalCalendar.assignAutoColors`). Never stored or synced.
+    public var autoColor: CalColor? = nil
+
     public var isOwn: Bool { role == .owner }
-    /// The color to draw it in for this person: their override, else the owner's.
-    public var displayColor: CalColor { prefColor != .none ? prefColor : color }
+    /// The color to draw it in for this person: their override, else the
+    /// owner's, else the automatic one.
+    public var displayColor: CalColor {
+        prefColor != .none ? prefColor : color != .none ? color : autoColor ?? .none
+    }
+}
+
+extension CalCalendar {
+    /// The colors a calendar can be given automatically, ordered so that
+    /// neighbours are far apart in hue: walking on from a taken one lands on a
+    /// clearly different color. Gray and brown are left out (they read as
+    /// "off"), and indigo comes last (it's the default for one's own).
+    static let autoPalette: [CalColor] = [.orange, .teal, .pink, .green, .purple, .yellow,
+                                          .sky, .red, .mint, .blue, .cyan, .indigo]
+
+    /// Gives every other calendar without a color an automatic one; anything
+    /// chosen (by this person or the owner) is left alone.
+    ///
+    /// - Colors in use are taken first: the person's own (indigo when unset)
+    ///   and every chosen one. The two beside the person's own on the hue
+    ///   wheel are skipped while anything else is free.
+    /// - Each calendar left starts at a place in `autoPalette` from its owner's
+    ///   id (stable across launches; Swift's `hashValue` isn't) and walks on to
+    ///   the first free color. They're handled in owner-id order, so the result
+    ///   doesn't depend on the order calendars arrive in.
+    /// - Once every color is taken, colors repeat (from the id alone).
+    static func assignAutoColors(_ cals: [CalCalendar]) -> [CalCalendar] {
+        var out = cals.map { c -> CalCalendar in var c = c; c.autoColor = nil; return c }
+        var taken: Set<CalColor> = []
+        let ownChosen = out.first { $0.isOwn }?.displayColor ?? CalColor.none
+        let own = ownChosen == .none ? CalColor.indigo : ownChosen
+        taken.insert(own)
+        let near = neighbours(of: own)
+        for c in out where !c.isOwn && c.displayColor != .none { taken.insert(c.displayColor) }
+        let open = out.indices
+            .filter { !out[$0].isOwn && out[$0].displayColor == .none }
+            .sorted { (out[$0].ownerID.uuidString, out[$0].id.uuidString) < (out[$1].ownerID.uuidString, out[$1].id.uuidString) }
+        let n = autoPalette.count
+        for i in open {
+            let start = stableIndex(out[i].ownerID, n)
+            let walk = (0..<n).lazy.map { autoPalette[(start + $0) % n] }
+            let pick = walk.first { !taken.contains($0) && !near.contains($0) }
+                ?? walk.first { !taken.contains($0) } ?? autoPalette[start]
+            out[i].autoColor = pick
+            taken.insert(pick)
+        }
+        return out
+    }
+
+    /// The colors either side of this one round the hue wheel (indigo: blue
+    /// and purple). Too close to tell apart at a glance, so a friend gets them
+    /// only once everything else is taken. Gray and brown have none.
+    static func neighbours(of c: CalColor) -> Set<CalColor> {
+        let wheel: [CalColor] = [.red, .orange, .yellow, .green, .mint, .teal, .cyan, .sky, .blue, .indigo, .purple, .pink]
+        guard let i = wheel.firstIndex(of: c) else { return [] }
+        return [wheel[(i + wheel.count - 1) % wheel.count], wheel[(i + 1) % wheel.count]]
+    }
+
+    /// FNV-1a over the id's bytes, mod `n`: the same on every launch and device.
+    static func stableIndex(_ id: UUID, _ n: Int) -> Int {
+        var h: UInt64 = 0xcbf2_9ce4_8422_2325
+        withUnsafeBytes(of: id.uuid) { for b in $0 { h = (h ^ UInt64(b)) &* 0x100_0000_01b3 } }
+        return Int(h % UInt64(n))
+    }
 }
 
 /// A named tag on a calendar.

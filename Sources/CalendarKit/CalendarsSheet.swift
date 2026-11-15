@@ -30,7 +30,7 @@ public struct CalendarSettingsView<Extra: View>: View {
                         Menu {
                             Picker("Color", selection: Binding(get: { c.prefColor }, set: { engine.setColor(c, $0) })) {
                                 ForEach(CalColor.allCases, id: \.self) { col in
-                                    Text(col == .none ? "Owner's color" : col.title).tag(col)
+                                    Text(col == .none ? (c.color == .none ? "Automatic" : "Owner's color") : col.title).tag(col)
                                 }
                             }
                         } label: {
