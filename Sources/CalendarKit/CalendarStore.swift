@@ -240,10 +240,14 @@ final class CalendarStore {
         try? context.fetch(FetchDescriptor<CalendarRecord>(predicate: #Predicate { $0.id == id })).first
     }
 
-    /// The server's list of calendars: upsert in order; cursors are kept.
+    /// The server's list of calendars: upsert in order; cursors are kept, and
+    /// so is the automatic color this device gave each one (it's this
+    /// device's, never synced: the server's copy has none).
     func setCalendars(_ cals: [CalCalendar]) {
         for (i, c) in cals.enumerated() {
             if let r = calendarRecord(c.id) {
+                var c = c
+                c.autoColor = decode(CalCalendar.self, r.payload)?.autoColor
                 r.payload = encode(c)
                 r.position = i
             } else {

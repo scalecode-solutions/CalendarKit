@@ -191,8 +191,13 @@ public final class CalendarEngine {
         var changed = store.eventChanges != publishedEventChanges
         publishedEventChanges = store.eventChanges
         // Automatic colors before the comparison, so an unchanged list still
-        // compares equal and doesn't rebuild the views.
-        let cals = CalCalendar.assignAutoColors(store.calendars().map(\.0))
+        // compares equal and doesn't rebuild the views. New or changed ones are
+        // remembered, so the next friend doesn't move them.
+        let stored = store.calendars().map(\.0)
+        let cals = CalCalendar.assignAutoColors(stored)
+        for (was, now) in zip(stored, cals) where was.autoColor != now.autoColor {
+            store.updateCalendar(now.id) { $0.autoColor = now.autoColor }
+        }
         if cals != calendars { calendars = cals; changed = true }
         let visible = Set(cals.map(\.id))
         let ls = store.labels().filter { visible.contains($0.calendarID) }

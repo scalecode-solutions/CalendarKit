@@ -99,8 +99,9 @@ public struct CalCalendar: Identifiable, Equatable, Sendable, Codable {
 
     /// What the engine draws it in when neither this person nor the owner chose
     /// a color: one apart from the person's own and the other calendars', from
-    /// the owner's id (`CalCalendar.assignAutoColors`). Never stored or synced.
-    public var autoColor: CalColor? = nil
+    /// the owner's id (`CalCalendar.assignAutoColors`). Kept in this device's
+    /// store so it doesn't move when friends come and go; never synced.
+    public internal(set) var autoColor: CalColor? = nil
 
     public var isOwn: Bool { role == .owner }
     /// The color to draw it in for this person: their override, else the
@@ -124,24 +125,44 @@ extension CalCalendar {
     /// - Colors in use are taken first: the person's own (indigo when unset)
     ///   and every chosen one. The two beside the person's own on the hue
     ///   wheel are skipped while anything else is free.
+    /// - A calendar keeps the automatic color it already has (`autoColor`, as
+    ///   the store remembers it) while that color is still free. So adding a
+    ///   friend never recolors another one. What can: a color being chosen (it
+    ///   gives way), or one beside the person's own being kept while a better
+    ///   one is free (after the person changes their color, or a friend goes).
     /// - Each calendar left starts at a place in `autoPalette` from its owner's
     ///   id (stable across launches; Swift's `hashValue` isn't) and walks on to
-    ///   the first free color. They're handled in owner-id order, so the result
-    ///   doesn't depend on the order calendars arrive in.
+    ///   the first free color, in owner-id order.
     /// - Once every color is taken, colors repeat (from the id alone).
     static func assignAutoColors(_ cals: [CalCalendar]) -> [CalCalendar] {
-        var out = cals.map { c -> CalCalendar in var c = c; c.autoColor = nil; return c }
+        var out = cals
         var taken: Set<CalColor> = []
         let ownChosen = out.first { $0.isOwn }?.displayColor ?? CalColor.none
         let own = ownChosen == .none ? CalColor.indigo : ownChosen
         taken.insert(own)
         let near = neighbours(of: own)
-        for c in out where !c.isOwn && c.displayColor != .none { taken.insert(c.displayColor) }
-        let open = out.indices
-            .filter { !out[$0].isOwn && out[$0].displayColor == .none }
+        func needsOne(_ c: CalCalendar) -> Bool { !c.isOwn && c.prefColor == .none && c.color == .none }
+        for c in out where !needsOne(c) && !c.isOwn { taken.insert(c.displayColor) }
+        let open = out.indices.filter { needsOne(out[$0]) }
             .sorted { (out[$0].ownerID.uuidString, out[$0].id.uuidString) < (out[$1].ownerID.uuidString, out[$1].id.uuidString) }
-        let n = autoPalette.count
+        // Those that already have one keep it first, so a newcomer can't take it.
+        // One beside the person's own is kept only while nothing better is free
+        // (it was given out when everything else was taken).
+        var newcomers: [Int] = []
+        var beside: [Int] = []
         for i in open {
+            guard let kept = out[i].autoColor, autoPalette.contains(kept), !taken.contains(kept) else {
+                newcomers.append(i); continue
+            }
+            if near.contains(kept) { beside.append(i) } else { taken.insert(kept) }
+        }
+        let betterFree = autoPalette.contains { !taken.contains($0) && !near.contains($0) }
+        for i in beside {
+            let kept = out[i].autoColor!
+            if betterFree || taken.contains(kept) { newcomers.append(i) } else { taken.insert(kept) }
+        }
+        let n = autoPalette.count
+        for i in newcomers {
             let start = stableIndex(out[i].ownerID, n)
             let walk = (0..<n).lazy.map { autoPalette[(start + $0) % n] }
             let pick = walk.first { !taken.contains($0) && !near.contains($0) }
@@ -149,6 +170,8 @@ extension CalCalendar {
             out[i].autoColor = pick
             taken.insert(pick)
         }
+        // A calendar that has a color now (chosen) forgets its automatic one.
+        for i in out.indices where !needsOne(out[i]) { out[i].autoColor = nil }
         return out
     }
 
