@@ -131,6 +131,24 @@ struct PairTests {
         #expect(!engine.writableCalendars.contains { $0.id == own })
     }
 
+    /// The server still takes a hide on a frozen pair: a hide queued beside
+    /// refused writes isn't dropped with them.
+    @Test func aFrozenPairKeepsAQueuedHide() async {
+        let (engine, server, own) = makeEngine()
+        await engine.refresh()
+        server.set { $0.offline = true }
+        engine.addEvent(to: own, allDay("One", 2026, 11, 20))
+        engine.setHidden(engine.calendar(own)!, true)
+        await engine.refresh()
+        server.set { $0.offline = false; $0.calendars[0].frozen = true }
+        await engine.refresh()
+        #expect(engine.notices.count == 1)
+        #expect(engine.pendingCount == 0)
+        #expect(server.get(\.writes).last == "pref")
+        #expect(server.get { $0.calendars[0].visible } == false)
+        #expect(engine.calendar(own)?.visible == false)
+    }
+
     @Test func aFocusedPairShowsEvenHiddenAndColorsByWhoAddedIt() async {
         let (engine, server, own) = makeEngine()
         _ = server.externalCreate(own, allDay("Theirs", 2026, 11, 10)) // the server's events are by the other person

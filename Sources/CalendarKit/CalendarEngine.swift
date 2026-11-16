@@ -601,6 +601,10 @@ public final class CalendarEngine {
         if let cal = w.calendarID(lookup: { store.event($0)?.calendarID }),
            (error as? CalTransportError).map({ if case .forbidden = $0 { return true }; return isOpenPair(w) }) == true {
             for (pid, other) in store.pending() where other.calendarID(lookup: { store.event($0)?.calendarID }) == cal {
+                // A frozen pair still takes the person's own prefs (hiding it
+                // is the point), so those stay queued; a pair that was never
+                // opened takes nothing.
+                if case .pref = other, !isOpenPair(w) { continue }
                 store.dropPending(pid)
                 if case .create(let e) = other { store.removeEvent(e.id) }
                 if case .exception(let e) = other { store.removeEvent(e.id) }
