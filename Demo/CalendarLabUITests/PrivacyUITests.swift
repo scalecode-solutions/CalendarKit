@@ -43,7 +43,7 @@ final class PrivacyUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [ok], timeout: timeout), .completed, "\(e) never said \(label): \(e.label)")
     }
 
-    /// The pair's privacy page, from the calendar.
+    /// The pair's privacy page, from the conversation's settings.
     func openPrivacy() {
         // A pair's settings live with the conversation (design review, 2026-11-16):
         // Chats → the friend → tap the name → Calendar → Privacy.
@@ -94,6 +94,15 @@ final class PrivacyUITests: XCTestCase {
         let renamed = app.buttons["privacy.partner.UI Alex B"].firstMatch
         XCTAssert(renamed.waitForExistence(timeout: 5), "the rename didn't land")
 
+        // My default partner: picked from the list, mine alone.
+        let def = reveal(app.buttons["privacy.partner.default"].firstMatch)
+        XCTAssert(def.label.contains("None"), def.label)
+        def.tap()
+        let choice = app.buttons["UI Alex B"].firstMatch
+        XCTAssert(choice.waitForExistence(timeout: 5), "the partner isn't offered as the default")
+        choice.tap()
+        waitFor(app.buttons["privacy.partner.default"].firstMatch, label: "UI Alex B")
+
         // Remove from the swipe: it asks first (there's no way back), then the
         // name leaves the list (design review, 2026-11-16: remove, not archive).
         renamed.swipeLeft()
@@ -103,6 +112,8 @@ final class PrivacyUITests: XCTestCase {
         let sheet = app.sheets.buttons["Remove"]
         (sheet.exists ? sheet : app.buttons["Remove"].firstMatch).tap()
         XCTAssert(renamed.waitForNonExistence(timeout: 5), "the partner is still listed")
+        // With no partners left there's no default to pick.
+        XCTAssert(app.buttons["privacy.partner.default"].waitForNonExistence(timeout: 5), "a default with no partners")
 
         // Cycle: on for both, then my own settings behind "Track my cycle too".
         let cycle = reveal(app.switches["privacy.cycle"])

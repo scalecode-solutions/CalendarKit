@@ -148,6 +148,16 @@ private struct PartnersSection: View {
                 }
                 .accessibilityIdentifier("privacy.partner.\(p.name)")
             }
+            if !partners.isEmpty {
+                // Yours alone, on this device: new entries and quick logs start
+                // with it (design review, 2026-11-16).
+                Picker("My default", selection: Binding(get: { engine.defaultPartner(in: pair) },
+                                                         set: { engine.setDefaultPartner($0, in: pair) })) {
+                    Text("None").tag(UUID?.none)
+                    ForEach(partners) { p in Text(p.name).tag(UUID?.some(p.id)) }
+                }
+                .accessibilityIdentifier("privacy.partner.default")
+            }
             if !pair.frozen {
                 HStack {
                     TextField("Add a name", text: $newName)
@@ -163,7 +173,7 @@ private struct PartnersSection: View {
         } header: {
             Text("Partners")
         } footer: {
-            Text("One list for this calendar: you both see it and add to it, and the entry editor picks from it. A color draws the heart in it; without one the heart takes the color of whoever logged it. Removing a name keeps it on past entries.")
+            Text("One list for this calendar: you both see it and add to it, and the entry editor picks from it. A color draws the heart in it; without one the heart takes the color of whoever logged it. Removing a name keeps it on past entries. Your default is only yours: new entries and quick logs start with it.")
         }
     }
 
