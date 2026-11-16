@@ -94,15 +94,18 @@ public struct CalCycleEstimator: Sendable {
         self.settings = settings
     }
 
-    /// The first day of each logged period (spotting never starts one; a
-    /// bleeding day within 3 days of the last bleeding day continues it).
+    /// The first day of each logged period. Spotting never starts one; a
+    /// bleeding day within 3 days of the last bleeding day continues it; and
+    /// bleeding less than 15 days after a start is mid-cycle, not a new
+    /// period (it would drag the average cycle down; Leaf's question).
     public var starts: [CalDate] {
         var out: [CalDate] = []
         var last: CalDate?
         for d in days where d.flow.startsAPeriod {
-            if let l = last, l.days(to: d.date) <= 3 { last = d.date; continue }
+            defer { last = d.date }
+            if let l = last, l.days(to: d.date) <= 3 { continue }
+            if let s = out.last, s.days(to: d.date) < 15 { continue }
             out.append(d.date)
-            last = d.date
         }
         return out
     }
