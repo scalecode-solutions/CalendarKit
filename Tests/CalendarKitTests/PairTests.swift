@@ -164,6 +164,16 @@ struct PairTests {
         #expect(engine.accentColor != engine.calendar(own)!.displayColor)
     }
 
+    @Test func aRememberedFocusOnSomeoneGoneFallsBackToEveryone() {
+        let friend = UUID(), gone = UUID()
+        let pairs = [CalCalendar(id: UUID(), otherID: friend)]
+        #expect(CalFocus.person(friend).resolved(in: pairs) == .person(friend))
+        #expect(CalFocus.person(gone).resolved(in: pairs) == .everyone)
+        #expect(CalFocus.everyone.resolved(in: pairs) == .everyone)
+        // Before anything has loaded, the pick is kept, not thrown away.
+        #expect(CalFocus.person(gone).resolved(in: []) == .person(gone))
+    }
+
     @Test func unlistedPairsSendNoCursor() throws {
         let store = try CalendarStore(userID: UUID(), appGroup: nil, inMemory: true)
         let listed = CalCalendar(id: UUID(), otherID: UUID())

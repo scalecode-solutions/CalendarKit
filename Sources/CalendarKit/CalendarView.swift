@@ -45,7 +45,10 @@ public struct CalendarView: View {
         _ownFocus = State(initialValue: CalFocus(stored: UserDefaults.standard.string(forKey: CalFocus.key(engine.config.currentUserID))))
     }
 
-    private var focus: CalFocus { hostFocus?.wrappedValue ?? ownFocus }
+    private var focus: CalFocus {
+        if let hostFocus { return hostFocus.wrappedValue }
+        return ownFocus.resolved(in: engine.calendars)
+    }
 
     private func choose(_ f: CalFocus) {
         withAnimation(.snappy) { ownFocus = f }
@@ -729,6 +732,15 @@ public enum CalFocus: Hashable, Sendable {
     }
 
     static func key(_ user: UUID) -> String { "CalendarKit.focus.\(user.uuidString)" }
+
+    /// The kit's remembered focus, against the pairs there are now: a person
+    /// with no pair any more (no longer a friend) is Everyone, rather than an
+    /// empty calendar with nothing selected. Nothing loaded yet keeps it; so
+    /// does the stored value, so it comes back if they do.
+    func resolved(in calendars: [CalCalendar]) -> CalFocus {
+        guard case .person(let id) = self, !calendars.isEmpty, !calendars.contains(where: { $0.otherID == id }) else { return self }
+        return .everyone
+    }
 }
 
 /// What a focus puts on screen.
