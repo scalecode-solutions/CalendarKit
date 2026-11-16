@@ -1121,6 +1121,30 @@ public final class CalendarEngine {
         return CalCycleEstimator(days: days, settings: settings)
     }
 
+    /// The person's own default partner on a pair: new entries and quick logs
+    /// start with it (design review, 2026-11-16). On this device, per account and pair,
+    /// like Opens on; nil when unset or when that name was removed.
+    public func defaultPartner(in calendar: CalCalendar) -> UUID? {
+        _ = defaultPartnerChanges
+        guard let raw = UserDefaults.standard.string(forKey: Self.defaultPartnerKey(config.currentUserID, calendar.id)),
+              let id = UUID(uuidString: raw) else { return nil }
+        return partners(of: calendar).contains { $0.id == id && !$0.archived } ? id : nil
+    }
+
+    /// nil: no default (new entries start with who unset).
+    public func setDefaultPartner(_ id: UUID?, in calendar: CalCalendar) {
+        let key = Self.defaultPartnerKey(config.currentUserID, calendar.id)
+        if let id { UserDefaults.standard.set(id.uuidString, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
+        defaultPartnerChanges += 1
+    }
+
+    static func defaultPartnerKey(_ me: UUID, _ pair: UUID) -> String {
+        "CalendarKit.defaultPartner.\(me.uuidString.lowercased()).\(pair.uuidString.lowercased())"
+    }
+
+    /// Bumped by setDefaultPartner so views reading defaultPartner redraw.
+    private var defaultPartnerChanges = 0
+
     /// A pair's partner list (archived ones last).
     public func partners(of calendar: CalCalendar) -> [CalPartner] {
         _ = revision

@@ -274,3 +274,38 @@ struct PrivateDataTests {
         #expect(day(second).count == 1)
     }
 }
+
+/// The person's default partner per pair (design review, 2026-11-16): on the device,
+/// per account and pair, and gone once that name is removed.
+@MainActor
+@Suite("Default partner", .serialized)
+struct DefaultPartnerTests {
+    @Test func setReadClearAndRemoved() async throws {
+        let (engine, server, own) = makeEngine()
+        server.externalConsent(own, true)
+        await engine.refresh()
+        engine.setConsent(try #require(engine.calendar(own)), .intimate, true)
+        await engine.refresh()
+        let cal = try #require(engine.calendar(own))
+        defer { engine.setDefaultPartner(nil, in: cal) }
+        #expect(engine.defaultPartner(in: cal) == nil)
+        let jordan = CalPartner(calendarID: own, name: "Jordan", color: .teal)
+        engine.savePartner(jordan)
+        engine.setDefaultPartner(jordan.id, in: cal)
+        #expect(engine.defaultPartner(in: cal) == jordan.id)
+        // Another account on this device has its own.
+        let other = CalendarEngine(config: CalendarConfig(baseURL: URL(string: "http://fake")!, currentUserID: UUID(),
+                                                          tokenProvider: { "t" }), transport: server)
+        #expect(other.defaultPartner(in: cal) == nil)
+        // Removed (archived): no longer the default.
+        var removed = jordan
+        removed.archived = true
+        engine.savePartner(removed)
+        #expect(engine.defaultPartner(in: cal) == nil)
+        // A name that isn't on the list at all isn't either.
+        engine.setDefaultPartner(UUID(), in: cal)
+        #expect(engine.defaultPartner(in: cal) == nil)
+        engine.setDefaultPartner(nil, in: cal)
+        #expect(UserDefaults.standard.string(forKey: CalendarEngine.defaultPartnerKey(engine.config.currentUserID, own)) == nil)
+    }
+}
