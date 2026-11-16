@@ -39,6 +39,7 @@ final class IntimacyUITests: XCTestCase {
     }
 
     func waitFor(_ e: XCUIElement, label: String, present: Bool = true, _ timeout: TimeInterval = 10) {
+        XCTAssert(e.waitForExistence(timeout: timeout), "\(e) isn't there to read") // absent would pass a NOT
         let p = NSPredicate(format: present ? "label CONTAINS %@" : "NOT (label CONTAINS %@)", label)
         let ok = XCTNSPredicateExpectation(predicate: p, object: e)
         XCTAssertEqual(XCTWaiter.wait(for: [ok], timeout: timeout), .completed,
@@ -80,6 +81,21 @@ final class IntimacyUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Today'")).firstMatch
     }
 
+    /// How many private entries today's cell says it has (other tests in the
+    /// run may have left some).
+    func privateCount() -> Int {
+        guard today.exists else { return -1 }
+        let l = today.label
+        guard let r = l.range(of: #"(\d+) private entr"#, options: .regularExpression) else { return 0 }
+        return Int(l[r].split(separator: " ")[0]) ?? 0
+    }
+
+    func waitForCount(_ n: Int) {
+        let p = NSPredicate { _, _ in self.privateCount() == n }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: p, object: nil)], timeout: 10), .completed,
+                       "today never had \(n) private entries: \(today.label)")
+    }
+
     func openToday() {
         XCTAssert(today.waitForExistence(timeout: 5))
         today.tap()
@@ -87,25 +103,32 @@ final class IntimacyUITests: XCTestCase {
     }
 
     func backToMonth() {
-        for _ in 0..<3 where !app.buttons["addMenu"].isHittable {
+        // The day view has a + too: the month is where today's cell is.
+        for _ in 0..<3 where !today.exists {
             app.navigationBars.buttons.element(boundBy: 0).tap()
-            _ = app.buttons["addMenu"].waitForExistence(timeout: 2)
+            _ = today.waitForExistence(timeout: 2)
         }
+        XCTAssert(today.exists, "not back on the month")
     }
 
     /// + → Quick log: today gets a private entry, hollow until who is set; the
     /// day view lists it, Solo fills it in, Delete removes it.
     func testQuickLogFillInAndDelete() {
+        XCTAssert(today.waitForExistence(timeout: 5))
+        let before = privateCount()
         app.buttons["addMenu"].tap()
         let quick = app.buttons["Quick log"].firstMatch
         XCTAssert(quick.waitForExistence(timeout: 5), "no Quick log in +")
         quick.tap()
-        waitFor(today, label: "1 private entry")
+        waitForCount(before + 1)
         shot("i1-quick-logged")
 
         openToday()
         // By label: the sections' identifiers cover their children's.
-        let entry = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Private entry'")).firstMatch
+        // The quick log is the one still asking who (the newest, last in the list).
+        let rows = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Private entry'"))
+        XCTAssert(rows.firstMatch.waitForExistence(timeout: 5), "no private entry in the day view")
+        let entry = rows.element(boundBy: rows.count - 1)
         XCTAssert(entry.waitForExistence(timeout: 5), "no private entry in the day view")
         XCTAssertFalse(entry.label.contains("Quick log") || entry.label.contains("Who"), "VoiceOver says more than 'Private entry': \(entry.label)")
         shot("i2-day")
@@ -125,14 +148,18 @@ final class IntimacyUITests: XCTestCase {
         let confirm = app.buttons["Delete"].firstMatch
         XCTAssert(confirm.waitForExistence(timeout: 5), "no delete confirmation")
         confirm.tap()
-        XCTAssert(entry.waitForNonExistence(timeout: 5), "the entry is still in the day view")
+        let gone = NSPredicate { _, _ in rows.count == before }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: gone, object: nil)], timeout: 5), .completed,
+                       "the entry is still in the day view")
         backToMonth()
-        waitFor(today, label: "private entr", present: false)
+        waitForCount(before)
     }
 
     /// + → Intimate with a new partner: saved, listed, and the filter hides
     /// it under Events and shows it under Intimate.
     func testEntryWithANewPartnerAndTheFilter() {
+        XCTAssert(today.waitForExistence(timeout: 5))
+        let before = privateCount()
         app.buttons["addMenu"].tap()
         let intimate = app.buttons["Intimate"].firstMatch
         XCTAssert(intimate.waitForExistence(timeout: 5), "no Intimate in +")
@@ -149,7 +176,7 @@ final class IntimacyUITests: XCTestCase {
         if !sam.isSelected { sam.tap() }
         shot("i3-editor-partner")
         app.buttons["Save"].tap()
-        waitFor(today, label: "1 private entry")
+        waitForCount(before + 1)
 
         // Events only: no private entry on the day. Intimate: back.
         app.buttons["kindFilter"].tap()
@@ -158,7 +185,7 @@ final class IntimacyUITests: XCTestCase {
         shot("i4-filter-events")
         app.buttons["kindFilter"].tap()
         app.buttons["Intimate"].firstMatch.tap()
-        waitFor(today, label: "1 private entry")
+        waitForCount(before + 1)
         app.buttons["kindFilter"].tap()
         app.buttons["All"].firstMatch.tap()
     }
