@@ -1037,11 +1037,13 @@ public final class CalendarEngine {
         commit(.savePrivate(e, baseRev: base))
     }
 
-    /// Log one now, with who left to fill in later (a hollow heart).
+    /// Log one now. Who is the person's default partner when they have one;
+    /// else it's left to fill in later (a hollow heart).
     @discardableResult
     public func quickLog(in calendar: CalCalendar, at: Date = Date()) -> CalPrivateEntry {
         var content = CalPrivateContent(at: at)
         content.quickLog = true
+        if let p = defaultPartner(in: calendar) { content.partnerIDs = [p] }
         let e = CalPrivateEntry(calendarID: calendar.id, content: content, createdBy: config.currentUserID)
         savePrivate(e)
         return e

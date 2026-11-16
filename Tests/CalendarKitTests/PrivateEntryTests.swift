@@ -63,6 +63,35 @@ struct PrivateEntryTests {
         #expect(onDay(engine).count == 1)
     }
 
+    /// The person's own default partner (design review, 2026-11-16): a quick log
+    /// starts with it, so its heart is solid; a removed partner is no default.
+    @Test func aQuickLogTakesTheDefaultPartner() async throws {
+        let (engine, server, own) = makeEngine()
+        server.externalConsent(own, true)
+        await engine.refresh()
+        let pair = engine.calendar(own)!
+        engine.setConsent(pair, .intimate, true)
+        await engine.refresh()
+        defer { engine.setDefaultPartner(nil, in: pair) }
+        let jordan = CalPartner(calendarID: own, name: "Jordan")
+        engine.savePartner(jordan)
+        await engine.refresh()
+        #expect(engine.defaultPartner(in: pair) == nil)
+        engine.setDefaultPartner(jordan.id, in: pair)
+        #expect(engine.defaultPartner(in: pair) == jordan.id)
+        let q = engine.quickLog(in: pair, at: nov16)
+        #expect(q.content.partnerIDs == [jordan.id] && !q.content.needsWho && q.content.quickLog)
+        #expect(engine.hearts(onDay(engine)).first?.hollow == false)
+
+        // Removed: no longer anyone's default, and a quick log is hollow again.
+        var gone = try #require(engine.partners(of: pair).first)
+        gone.archived = true
+        engine.savePartner(gone)
+        await engine.refresh()
+        #expect(engine.defaultPartner(in: pair) == nil)
+        #expect(engine.quickLog(in: pair, at: nov16).content.needsWho)
+    }
+
     @Test func aQuickLogIsHollowUntilWhoIsSet() async throws {
         let (engine, server, own) = makeEngine()
         server.externalConsent(own, true)
