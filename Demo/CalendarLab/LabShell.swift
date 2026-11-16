@@ -16,12 +16,12 @@ import CalendarKit
 struct LabShell<Account: View>: View {
     let session: LabSession
     @ViewBuilder let account: () -> Account
-    @State private var tab: LabTab = .chats
+    @State private var tab: LabTab = LabStart.fromEnvironment == .calendar ? .home : .chats
 
     var body: some View {
         TabView(selection: $tab) {
             Tab("Home", systemImage: "house", value: LabTab.home) {
-                LabHomeView(session: session)
+                LabHomeView(session: session, opensCalendar: LabStart.fromEnvironment == .calendar)
             }
             Tab("Chats", systemImage: "bubble.left.and.bubble.right", value: LabTab.chats) {
                 LabChatsView(session: session)
@@ -40,19 +40,35 @@ enum LabTab: Hashable {
     case home, chats, settings
 }
 
+/// Where the Lab opens. Normally on Chats, as a chat host does. The kit's UI
+/// tests set the launch environment `LAB_START=calendar` to open straight on
+/// the calendar (Home → Calendar, pushed), so every test starts on the
+/// calendar's own screen without driving the shell first.
+enum LabStart: String {
+    case calendar
+
+    static var fromEnvironment: LabStart? {
+        ProcessInfo.processInfo.environment["LAB_START"].flatMap(LabStart.init(rawValue:))
+    }
+}
+
 // MARK: - Home
 
 /// The home screen: tiles, the first of which is the all-calendars view.
 struct LabHomeView: View {
     let session: LabSession
+    @State private var path: [LabHomeRoute]
+
+    init(session: LabSession, opensCalendar: Bool = false) {
+        self.session = session
+        _path = State(initialValue: opensCalendar ? [.calendar] : [])
+    }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    NavigationLink {
-                        LabCalendarScreen(session: session, title: "Calendar")
-                    } label: {
+                    NavigationLink(value: LabHomeRoute.calendar) {
                         LabTile(title: "Calendar", subtitle: "Everyone you share with", symbol: "calendar")
                     }
                     .buttonStyle(.plain)
@@ -61,8 +77,17 @@ struct LabHomeView: View {
                 .padding(16)
             }
             .navigationTitle("Home")
+            .navigationDestination(for: LabHomeRoute.self) { route in
+                switch route {
+                case .calendar: LabCalendarScreen(session: session, title: "Calendar")
+                }
+            }
         }
     }
+}
+
+enum LabHomeRoute: Hashable {
+    case calendar
 }
 
 struct LabTile: View {

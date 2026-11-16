@@ -69,6 +69,21 @@ final class LabShellUITests: XCTestCase {
         XCTAssert(tile.waitForExistence(timeout: 5), "back didn't land on Home")
     }
 
+    /// `LAB_START=calendar` (the kit's UI tests' entry) opens on the calendar,
+    /// pushed under Home, so back still lands on Home.
+    func testLabStartCalendarOpensOnTheCalendar() {
+        app.terminate()
+        app.launchEnvironment["LAB_START"] = "calendar"
+        app.launch()
+
+        assertCalendarShowing()
+        XCTAssert(app.tabBars.buttons["Home"].isSelected, "LAB_START=calendar didn't open under Home")
+        shot("lab-start-calendar")
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssert(app.buttons["home.calendar"].waitForExistence(timeout: 5), "back didn't land on Home")
+    }
+
     /// Settings carries the kit's settings with the Lab's account rows.
     func testSettingsHasTheAccountRows() {
         app.tabBars.buttons["Settings"].tap()
