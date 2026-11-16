@@ -42,8 +42,6 @@ struct PrivateEntryEditor: View {
     @State private var content: CalPrivateContent
     @State private var calendarID: UUID?
     @State private var showPositions: Bool
-    @State private var addingPartner = false
-    @State private var newPartner = ""
     @State private var confirmDelete = false
 
     init(engine: CalendarEngine, sheet: PrivateSheet) {
@@ -85,6 +83,11 @@ struct PrivateEntryEditor: View {
     }
 
     private var pair: CalCalendar? { calendarID.flatMap { engine.calendar($0) } }
+    /// Where partners come from, when there are none yet.
+    private var noPartners: String {
+        let who = pair.map { engine.displayName($0) } ?? "them"
+        return "No partners yet. Add them under Privacy in your settings with \(who)."
+    }
     /// A frozen pair (or one whose consent went off) is read-only.
     private var readOnly: Bool { pair.map { $0.frozen || !$0.intimateOn } ?? true }
     private var partners: [CalPartner] { pair.map { engine.partners(of: $0) } ?? [] }
@@ -122,13 +125,6 @@ struct PrivateEntryEditor: View {
                     Button("Save") { save() }.disabled(pair == nil)
                 }
             }
-        }
-        .alert("New partner", isPresented: $addingPartner) {
-            TextField("Name", text: $newPartner)
-            Button("Add") { addPartner() }
-            Button("Cancel", role: .cancel) { newPartner = "" }
-        } message: {
-            Text("A name on this calendar's list. You both see it.")
         }
         .confirmationDialog("Delete this entry?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
@@ -184,7 +180,14 @@ struct PrivateEntryEditor: View {
                     }
                     .accessibilityAddTraits(content.partnerIDs.contains(p.id) ? .isSelected : [])
                 }
-                Button { addingPartner = true } label: { Label("Add a partner", systemImage: "plus") }
+                // Partners are managed in the pair's settings only (design review,
+                // 2026-11-16): here they're picked, never added.
+                if offered.isEmpty {
+                    Text(noPartners)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("noPartners")
+                }
             }
         } header: {
             Text("Who")
@@ -272,15 +275,6 @@ struct PrivateEntryEditor: View {
         } else {
             content.partnerIDs.append(p.id)
         }
-    }
-
-    private func addPartner() {
-        let name = newPartner.trimmingCharacters(in: .whitespacesAndNewlines)
-        newPartner = ""
-        guard let pair, !name.isEmpty else { return }
-        let p = CalPartner(calendarID: pair.id, name: name)
-        engine.savePartner(p)
-        content.partnerIDs.append(p.id)
     }
 
     private func save() {

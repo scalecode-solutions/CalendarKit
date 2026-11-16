@@ -155,26 +155,21 @@ final class IntimacyUITests: XCTestCase {
         waitForCount(before)
     }
 
-    /// + → Intimate with a new partner: saved, listed, and the filter hides
-    /// it under Events and shows it under Intimate.
-    func testEntryWithANewPartnerAndTheFilter() {
+    /// + → Intimate: the editor only picks partners (they're added in the
+    /// pair's settings, design review 2026-11-16), so with none yet it says where;
+    /// Solo saves it, and the filter hides it under Events and shows it under
+    /// Intimate.
+    func testEntryAndTheFilter() {
         XCTAssert(today.waitForExistence(timeout: 5))
         let before = privateCount()
         app.buttons["addMenu"].tap()
         let intimate = app.buttons["Intimate"].firstMatch
         XCTAssert(intimate.waitForExistence(timeout: 5), "no Intimate in +")
         intimate.tap()
-        let addPartner = app.buttons["Add a partner"]
-        XCTAssert(reveal(addPartner).exists)
-        addPartner.tap()
-        let field = app.alerts.textFields.firstMatch
-        XCTAssert(field.waitForExistence(timeout: 5), "no new partner prompt")
-        field.typeText("UI Sam")
-        app.alerts.buttons["Add"].tap()
-        let sam = app.buttons.matching(NSPredicate(format: "label CONTAINS 'UI Sam'")).firstMatch
-        XCTAssert(sam.waitForExistence(timeout: 5), "the new partner isn't offered")
-        if !sam.isSelected { sam.tap() }
-        shot("i3-editor-partner")
+        XCTAssertFalse(app.buttons["Add a partner"].exists, "the editor still adds partners")
+        XCTAssert(app.staticTexts["noPartners"].waitForExistence(timeout: 5), "no line saying where partners are added")
+        flip(app.switches["Solo"])
+        shot("i3-editor-no-partners")
         app.buttons["Save"].tap()
         waitForCount(before + 1)
 
