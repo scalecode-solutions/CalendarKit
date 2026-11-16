@@ -671,6 +671,23 @@ public final class CalendarEngine {
             store.setPrivateCursor(e.calendarID, 0)
         case .deletePrivate(_, _, let cal):
             store.setPrivateCursor(cal, 0)
+        // The rest of the private stream, the same way (Torsion's review,
+        // MVCALE-28): a new row that was refused never existed on the server,
+        // so it goes; a changed one is reloaded from the server's copy.
+        case .savePartner(let p) where p.rev == 0:
+            store.removePrivate(p.id)
+        case .savePartner(let p):
+            store.setPrivateCursor(p.calendarID, 0)
+        case .saveCycleDay(let d) where d.rev == 0:
+            store.removePrivate(d.id)
+        case .saveCycleDay(let d):
+            store.setCycleCursor(d.calendarID, 0)
+        case .deleteCycleDay(_, let cal):
+            store.setCycleCursor(cal, 0)
+        case .saveCycleSettings(let st) where st.rev == 0:
+            store.removePrivate(CalendarStore.settingsID(st))
+        case .saveCycleSettings(let st):
+            store.setCycleCursor(st.calendarID, 0)
         case .create(let e), .exception(let e):
             store.removeEvent(e.id) // it never existed on the server
         default: break
