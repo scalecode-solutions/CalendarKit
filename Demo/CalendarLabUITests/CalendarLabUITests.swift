@@ -211,6 +211,9 @@ final class CalendarLabUITests: XCTestCase {
         XCTAssertFalse(todayHasIt(), "a hidden pair still shows in Everyone")
         let hidden = app.buttons["Hidden calendars, 1"]
         XCTAssert(hidden.waitForExistence(timeout: 5), "no Hidden (1) in the picker")
+        // It's last in the row: on a small phone at large text, scroll to it.
+        let width = app.windows.firstMatch.frame.maxX
+        for _ in 0..<5 where hidden.frame.maxX > width { app.buttons["Everyone"].swipeLeft() }
         hidden.tap()
         // The menu lists the hidden pairs; there's one.
         let item = app.collectionViews.buttons.firstMatch
