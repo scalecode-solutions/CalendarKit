@@ -171,7 +171,7 @@ struct PrivateEntryEditor: View {
                             Image(systemName: "heart.fill")
                                 .foregroundStyle(p.color == .none ? AnyShapeStyle(.tertiary) : AnyShapeStyle(CalTint(p.color)))
                             Text(p.name).foregroundStyle(.primary)
-                            if p.archived { Text("Archived").font(.caption).foregroundStyle(.secondary) }
+                            if p.archived { Text("Removed").font(.caption).foregroundStyle(.secondary) }
                             Spacer()
                             if content.partnerIDs.contains(p.id) {
                                 Image(systemName: "checkmark").foregroundStyle(.tint)
