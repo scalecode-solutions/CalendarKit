@@ -333,6 +333,12 @@ final class FakeServer: CalendarTransport, Sendable {
     }
 
     func listActivity(calendarID: UUID, cursor: String?, limit: Int) async throws -> (rows: [CalActivity], next: String?) { ([], nil) }
+
+    // Private entries: filled in with the engine's private stream (design sprint).
+    func setConsent(calendarID: UUID, kind: CalConsentKind, on: Bool) async throws -> CalCalendar { throw CalTransportError.notFound }
+    func savePrivateEntry(_ e: CalPrivateEntry, baseRev: Int64) async throws -> CalPrivateEntry { throw CalTransportError.notFound }
+    func deletePrivateEntry(id: UUID, baseRev: Int64) async throws -> Int64 { throw CalTransportError.notFound }
+    func savePartner(_ p: CalPartner) async throws -> CalPartner { throw CalTransportError.notFound }
 }
 
 /// Tests' shorthand for the pair a calendar was in the per-person model.

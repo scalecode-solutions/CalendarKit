@@ -409,9 +409,12 @@ public struct CalActivity: Identifiable, Equatable, Sendable {
 public struct CalCursor: Equatable, Sendable {
     public var rev: Int64
     public var loadFrom: Int64
-    public init(rev: Int64, loadFrom: Int64 = 0) {
+    /// The private stream's cursor (0 = none held).
+    public var intimate: Int64
+    public init(rev: Int64, loadFrom: Int64 = 0, intimate: Int64 = 0) {
         self.rev = rev
         self.loadFrom = loadFrom
+        self.intimate = intimate
     }
 }
 
@@ -427,6 +430,8 @@ public struct CalDelta: Equatable, Sendable {
     public let reload: Bool
     /// While a full load is still paging: echo it back on the next cursor.
     public var loadFrom: Int64 = 0
+    /// The pair's private stream (empty unless both members consented).
+    public var privateDelta: CalPrivateDelta = .none
 }
 
 /// One Sync answer.

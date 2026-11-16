@@ -63,6 +63,14 @@ public protocol CalendarTransport: Sendable {
     func saveLabel(id: UUID, calendarID: UUID, name: String, color: CalColor) async throws -> CalLabel
     func deleteLabel(id: UUID) async throws
     func listActivity(calendarID: UUID, cursor: String?, limit: Int) async throws -> (rows: [CalActivity], next: String?)
+
+    // Private entries (0.8.0 design sprint, PROVISIONAL).
+    /// Turns the caller's own consent for a kind on or off; returns the pair.
+    func setConsent(calendarID: UUID, kind: CalConsentKind, on: Bool) async throws -> CalCalendar
+    /// Creates (baseRev 0) or replaces an entry.
+    func savePrivateEntry(_ e: CalPrivateEntry, baseRev: Int64) async throws -> CalPrivateEntry
+    func deletePrivateEntry(id: UUID, baseRev: Int64) async throws -> Int64
+    func savePartner(_ p: CalPartner) async throws -> CalPartner
 }
 
 public extension CalendarTransport {
@@ -130,6 +138,7 @@ public struct ConnectCalendarTransport: CalendarTransport {
             c.calendarID = id.uuidString.lowercased()
             c.rev = cur.rev
             c.loadFrom = cur.loadFrom
+            c.intimateRev = cur.intimate
             return c
         }
         return try Wire.syncPage(value(await client.sync(request: req, headers: try await headers())))
@@ -213,6 +222,42 @@ public struct ConnectCalendarTransport: CalendarTransport {
         var req = Calendar_V1_OpenPairRequest()
         req.otherID = Wire.id(otherID)
         return try Wire.calendar(value(await client.openPair(request: req, headers: try await headers())).calendar)
+    }
+
+    // MARK: private entries
+
+    public func setConsent(calendarID: UUID, kind: CalConsentKind, on: Bool) async throws -> CalCalendar {
+        var req = Calendar_V1_SetConsentRequest()
+        req.calendarID = Wire.id(calendarID)
+        req.kind = kind == .intimate ? .intimate : .cycle
+        req.on = on
+        return try Wire.calendar(value(await client.setConsent(request: req, headers: try await headers())).calendar)
+    }
+
+    public func savePrivateEntry(_ e: CalPrivateEntry, baseRev: Int64) async throws -> CalPrivateEntry {
+        var req = Calendar_V1_SaveIntimateEntryRequest()
+        req.id = Wire.id(e.id)
+        req.calendarID = Wire.id(e.calendarID)
+        req.baseRev = baseRev
+        req.content = Wire.content(e.content)
+        return try Wire.privateEntry(value(await client.saveIntimateEntry(request: req, headers: try await headers())).entry)
+    }
+
+    public func deletePrivateEntry(id: UUID, baseRev: Int64) async throws -> Int64 {
+        var req = Calendar_V1_DeleteIntimateEntryRequest()
+        req.id = Wire.id(id)
+        req.baseRev = baseRev
+        return try value(await client.deleteIntimateEntry(request: req, headers: try await headers())).rev
+    }
+
+    public func savePartner(_ p: CalPartner) async throws -> CalPartner {
+        var req = Calendar_V1_SaveIntimatePartnerRequest()
+        req.id = Wire.id(p.id)
+        req.calendarID = Wire.id(p.calendarID)
+        req.name = p.name
+        req.color = p.color.rawValue
+        req.archived = p.archived
+        return try Wire.partner(value(await client.saveIntimatePartner(request: req, headers: try await headers())).partner)
     }
 
     // MARK: labels and history
@@ -373,8 +418,77 @@ enum Wire {
     // the rest
 
     static func calendar(_ w: Calendar_V1_Calendar) throws -> CalCalendar {
-        CalCalendar(id: try uuid(w.id), otherID: try uuid(w.otherID), name: w.name, rev: w.rev, frozen: w.frozen,
-                    visible: w.visible, prefColor: color(w.prefColor))
+        var c = CalCalendar(id: try uuid(w.id), otherID: try uuid(w.otherID), name: w.name, rev: w.rev, frozen: w.frozen,
+                            visible: w.visible, prefColor: color(w.prefColor))
+        c.intimateMine = w.intimateMine
+        c.intimateTheirs = w.intimateTheirs
+        c.cycleMine = w.cycleMine
+        c.cycleTheirs = w.cycleTheirs
+        c.intimateRev = w.intimateRev
+        return c
+    }
+
+    // private entries
+
+    static func content(_ c: CalPrivateContent) -> Calendar_V1_IntimateContent {
+        var w = Calendar_V1_IntimateContent()
+        w.at = ms(c.at)
+        w.timeZone = c.timeZone
+        w.durationMin = Int32(c.durationMinutes)
+        w.foreplayMin = Int32(c.foreplayMinutes)
+        w.partnerIds = c.partnerIDs.map(id)
+        w.solo = c.solo
+        w.types = c.types
+        w.protection = c.protection
+        w.finishedInside = c.finishedInside.sorted { $0.key.uuidString < $1.key.uuidString }.map { k, v in
+            var f = Calendar_V1_FinishedInside()
+            f.partnerID = id(k)
+            f.value = v
+            return f
+        }
+        w.orgasmsMe = Int32(c.orgasmsMe)
+        w.orgasmsPartner = Int32(c.orgasmsPartner)
+        w.initiatedBy = c.initiatedBy
+        w.location = c.location
+        w.locationNote = c.locationNote
+        w.satisfaction = Int32(c.satisfaction)
+        w.notes = c.notes
+        w.quickLog = c.quickLog
+        w.positions = c.positions
+        return w
+    }
+
+    static func content(_ w: Calendar_V1_IntimateContent) -> CalPrivateContent {
+        var c = CalPrivateContent(at: date(w.at), timeZone: w.timeZone.isEmpty ? TimeZone.current.identifier : w.timeZone)
+        c.durationMinutes = Int(w.durationMin)
+        c.foreplayMinutes = Int(w.foreplayMin)
+        c.partnerIDs = w.partnerIds.compactMap(UUID.init(uuidString:))
+        c.solo = w.solo
+        c.types = w.types
+        c.protection = w.protection
+        c.finishedInside = Dictionary(w.finishedInside.compactMap { f in UUID(uuidString: f.partnerID).map { ($0, f.value) } },
+                                      uniquingKeysWith: { a, _ in a })
+        c.orgasmsMe = Int(w.orgasmsMe)
+        c.orgasmsPartner = Int(w.orgasmsPartner)
+        c.initiatedBy = w.initiatedBy
+        c.location = w.location
+        c.locationNote = w.locationNote
+        c.satisfaction = Int(w.satisfaction)
+        c.notes = w.notes
+        c.quickLog = w.quickLog
+        c.positions = w.positions
+        return c
+    }
+
+    static func privateEntry(_ w: Calendar_V1_IntimateEntry) throws -> CalPrivateEntry {
+        CalPrivateEntry(id: try uuid(w.id), calendarID: try uuid(w.calendarID), content: content(w.content),
+                        createdBy: UUID(uuidString: w.createdBy) ?? UUID(), updatedBy: UUID(uuidString: w.updatedBy),
+                        rev: w.rev, deleted: w.deleted)
+    }
+
+    static func partner(_ w: Calendar_V1_IntimatePartner) throws -> CalPartner {
+        CalPartner(id: try uuid(w.id), calendarID: try uuid(w.calendarID), name: w.name, color: color(w.color),
+                   archived: w.archived, rev: w.rev, deleted: w.deleted)
     }
 
     static func label(_ w: Calendar_V1_Label) throws -> CalLabel {
@@ -389,7 +503,11 @@ enum Wire {
                          events: try d.events.map(event),
                          labels: try d.labels.filter { !$0.deleted }.map(label),
                          deletedLabelIDs: try d.labels.filter(\.deleted).map { try uuid($0.id) },
-                         rev: d.rev, hasMore: d.hasMore_p, reload: d.reload, loadFrom: d.loadFrom)
+                         rev: d.rev, hasMore: d.hasMore_p, reload: d.reload, loadFrom: d.loadFrom,
+                         privateDelta: CalPrivateDelta(entries: try d.intimateEntries.map(privateEntry),
+                                                       partners: try d.intimatePartners.map(partner),
+                                                       rev: d.intimateRev, hasMore: d.intimateHasMore,
+                                                       reset: d.intimateReset))
             },
             gone: try w.gone.map(uuid))
     }
