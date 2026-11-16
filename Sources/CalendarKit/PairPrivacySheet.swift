@@ -11,6 +11,7 @@ import SwiftUI
 public struct PairPrivacySheet: View {
     let engine: CalendarEngine
     let calendarID: UUID
+    @State private var showMine = false
 
     public init(engine: CalendarEngine, calendar: CalCalendar) {
         self.engine = engine
@@ -24,9 +25,23 @@ public struct PairPrivacySheet: View {
                 if c.intimateOn { PartnersSection(engine: engine, pair: c) }
                 ConsentSection(engine: engine, pair: c, kind: .cycle)
                 if c.cycleOn {
-                    CycleSettingsSection(engine: engine, pair: c, person: engine.config.currentUserID, title: "Your cycle")
-                    if engine.cyclePeople(in: c).contains(c.otherID) {
+                    // Whose cycles this pair tracks: anyone with a logged day or
+                    // settings. Yours shows once you ask for it (or log one).
+                    let people = engine.cyclePeople(in: c)
+                    let me = engine.config.currentUserID
+                    if people.contains(me) || showMine {
+                        CycleSettingsSection(engine: engine, pair: c, person: me, title: "Your cycle")
+                    }
+                    if people.contains(c.otherID) {
                         CycleSettingsSection(engine: engine, pair: c, person: c.otherID, title: "\(engine.displayName(c))’s cycle")
+                    }
+                    if !people.contains(me) && !showMine && !c.frozen {
+                        Section {
+                            Button("Track my cycle too") { showMine = true }
+                                .accessibilityIdentifier("privacy.cycle.mine")
+                        } footer: {
+                            if people.isEmpty { Text("Or log a period day from any day on the calendar.") }
+                        }
                     }
                 }
             }
