@@ -148,10 +148,21 @@ struct EventEditorView: View {
     }
 }
 
+extension View {
+    /// A segmented picker, or a menu when `menu` (large text sizes).
+    @ViewBuilder func segmentedUnless(_ menu: Bool) -> some View {
+        if menu { pickerStyle(.menu) } else { pickerStyle(.segmented) }
+    }
+}
+
 struct RepeatSection: View {
     @Binding var draft: CalEventDraft
     @Environment(\.calendarAccent) private var accent
     @ScaledMetric(relativeTo: .footnote) private var chip: CGFloat = 32
+    @Environment(\.dynamicTypeSize) private var typeSize
+    /// Segmented controls cut their labels ("Wee…") from extra-extra-large
+    /// text: from there the same choices are a menu, still one tap to open.
+    private var asMenu: Bool { typeSize >= .xxLarge }
 
     var body: some View {
         Section {
@@ -164,7 +175,7 @@ struct RepeatSection: View {
                 Text("Monthly").tag(Optional(CalFrequency.monthly))
                 Text("Yearly").tag(Optional(CalFrequency.yearly))
             }
-            .pickerStyle(.segmented)
+            .segmentedUnless(asMenu)
             .accessibilityIdentifier("Repeat")
             if draft.frequency != nil {
                 Stepper("Every \(draft.customRule.interval == 1 ? "" : "\(draft.customRule.interval) ")\(unit)",
@@ -184,7 +195,7 @@ struct RepeatSection: View {
                     Text("On a date").tag(1)
                     Text("After").tag(2)
                 }
-                .pickerStyle(.segmented)
+                .segmentedUnless(asMenu)
                 switch draft.ending {
                 case .on(let d):
                     DatePicker("End date", selection: Binding(
