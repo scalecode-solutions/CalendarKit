@@ -60,7 +60,12 @@ struct PrivateEntryEditor: View {
                 at = cal.date(from: DateComponents(year: day.year, month: day.month, day: day.day,
                                                    hour: t.hour, minute: t.minute)) ?? now
             }
-            _content = State(initialValue: CalPrivateContent(at: at, timeZone: zone.identifier))
+            var c = CalPrivateContent(at: at, timeZone: zone.identifier)
+            // The person's own default partner on that pair, if they set one.
+            if let first = pairs.first.flatMap({ engine.calendar($0) }), let p = engine.defaultPartner(in: first) {
+                c.partnerIDs = [p]
+            }
+            _content = State(initialValue: c)
             _calendarID = State(initialValue: pairs.first)
             _showPositions = State(initialValue: false)
         case .edit(let e):
@@ -114,6 +119,13 @@ struct PrivateEntryEditor: View {
             }
         }
         .disabled(readOnly)
+        // Another pair chosen for a new entry: its partners, and its default.
+        .onChange(of: calendarID) { _, id in
+            guard existing == nil, let c = id.flatMap({ engine.calendar($0) }) else { return }
+            content.solo = false
+            content.partnerIDs = engine.defaultPartner(in: c).map { [$0] } ?? []
+            content.finishedInside = [:]
+        }
         .scrollContentBackground(.hidden)
         .calendarBackdrop(engine)
         .navigationTitle("Intimate")
@@ -158,48 +170,65 @@ struct PrivateEntryEditor: View {
         }
     }
 
+    /// What Who is set to: one pick from a dropdown (design review, 2026-11-16: a
+    /// plain dropdown, not a visible roster). An older entry naming several
+    /// partners keeps them as its own choice until someone picks another.
+    enum Who: Hashable {
+        case notSet, solo, partner(UUID), several([UUID])
+    }
+
+    private var who: Binding<Who> {
+        Binding(get: {
+            let c = content
+            if c.solo { return .solo }
+            switch c.partnerIDs.count {
+            case 0: return .notSet
+            case 1: return .partner(c.partnerIDs[0])
+            default: return .several(c.partnerIDs)
+            }
+        }, set: { w in
+            switch w {
+            case .notSet: content.solo = false; content.partnerIDs = []
+            case .solo: content.solo = true; content.partnerIDs = []
+            case .partner(let id): content.solo = false; content.partnerIDs = [id]
+            case .several(let ids): content.solo = false; content.partnerIDs = ids
+            }
+            // Finished inside is kept only for whoever is still named.
+            content.finishedInside = content.finishedInside.filter { content.partnerIDs.contains($0.key) }
+        })
+    }
+
     private var whoSection: some View {
         Section {
-            Toggle("Solo", isOn: Binding(get: { content.solo }, set: { on in
-                content.solo = on
-                if on { content.partnerIDs = []; content.finishedInside = [:] }
-            }))
-            if !content.solo {
-                ForEach(offered) { p in
-                    Button { toggle(p) } label: {
-                        HStack {
-                            Image(systemName: "heart.fill")
-                                .foregroundStyle(p.color == .none ? AnyShapeStyle(.tertiary) : AnyShapeStyle(CalTint(p.color)))
-                            Text(p.name).foregroundStyle(.primary)
-                            if p.archived { Text("Removed").font(.caption).foregroundStyle(.secondary) }
-                            Spacer()
-                            if content.partnerIDs.contains(p.id) {
-                                Image(systemName: "checkmark").foregroundStyle(.tint)
-                            }
-                        }
-                    }
-                    .accessibilityAddTraits(content.partnerIDs.contains(p.id) ? .isSelected : [])
+            Picker("Who", selection: who) {
+                Text("Not set").tag(Who.notSet)
+                Text("Solo").tag(Who.solo)
+                if content.partnerIDs.count > 1 {
+                    Text(PrivateEntryRow.names(content.partnerIDs, partners: partners)).tag(Who.several(content.partnerIDs))
                 }
-                // Partners are managed in the pair's settings only (design review,
-                // 2026-11-16): here they're picked, never added.
-                if offered.isEmpty {
-                    Text(noPartners)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("noPartners")
+                ForEach(offered) { p in
+                    Text(p.archived ? "\(p.name) (removed)" : p.name).tag(Who.partner(p.id))
                 }
             }
-        } header: {
-            Text("Who")
+            .accessibilityIdentifier("who")
+            // Partners are managed in the pair's settings only (design review,
+            // 2026-11-16): here they're picked, never added.
+            if offered.isEmpty {
+                Text(noPartners)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("noPartners")
+            }
         } footer: {
             if content.needsWho { Text("Pick who, or Solo. Until then it shows as a hollow heart.") }
         }
     }
 
     private var finishedSection: some View {
-        Section("Finished inside") {
+        Section {
             ForEach(content.partnerIDs, id: \.self) { id in
-                Picker(partners.first { $0.id == id }?.name ?? "Partner",
+                // One partner (the usual case): just "Finished inside".
+                Picker(content.partnerIDs.count == 1 ? "Finished inside" : "Finished inside: \(partners.first { $0.id == id }?.name ?? "Partner")",
                        selection: Binding(get: { content.finishedInside[id] ?? "" },
                                           set: { content.finishedInside[id] = $0.isEmpty ? nil : $0 })) {
                     ForEach(["", "yes", "no", "unsure"], id: \.self) { Text(PrivateChoices.title($0)).tag($0) }
@@ -267,15 +296,6 @@ struct PrivateEntryEditor: View {
     }
 
     // MARK: actions
-
-    private func toggle(_ p: CalPartner) {
-        if let i = content.partnerIDs.firstIndex(of: p.id) {
-            content.partnerIDs.remove(at: i)
-            content.finishedInside[p.id] = nil
-        } else {
-            content.partnerIDs.append(p.id)
-        }
-    }
 
     private func save() {
         guard let pair else { return }

@@ -343,8 +343,15 @@ struct PrivateEntryRow: View {
         if c.solo { return "Solo" }
         if c.needsWho { return "Who? Add the details" }
         let names = engine.partners(of: engine.calendar(entry.calendarID) ?? .placeholder(entry.calendarID))
-        let byID = Dictionary(names.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
-        return c.partnerIDs.compactMap { byID[$0] }.joined(separator: ", ").nonEmpty ?? "Someone"
+        return PrivateEntryRow.names(c.partnerIDs, partners: names)
+    }
+
+    /// "Jordan", or for an older entry naming several, "Jordan +1".
+    static func names(_ ids: [UUID], partners: [CalPartner]) -> String {
+        let byID = Dictionary(partners.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        guard let first = ids.first else { return "Someone" }
+        let name = byID[first] ?? "Someone"
+        return ids.count > 1 ? "\(name) +\(ids.count - 1)" : name
     }
 
     private var details: String? {

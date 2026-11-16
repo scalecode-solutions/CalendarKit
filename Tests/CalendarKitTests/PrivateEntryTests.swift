@@ -92,6 +92,16 @@ struct PrivateEntryTests {
         #expect(engine.quickLog(in: pair, at: nov16).content.needsWho)
     }
 
+    /// Who on a row: one name, or for an older entry naming several, the
+    /// first and "+n" (one pick per entry since the design review's dropdown).
+    @Test func severalPartnersReadAsTheFirstPlusTheRest() {
+        let cal = UUID()
+        let a = CalPartner(calendarID: cal, name: "Jordan"), b = CalPartner(calendarID: cal, name: "Casey")
+        #expect(PrivateEntryRow.names([a.id], partners: [a, b]) == "Jordan")
+        #expect(PrivateEntryRow.names([a.id, b.id], partners: [a, b]) == "Jordan +1")
+        #expect(PrivateEntryRow.names([], partners: [a]) == "Someone")
+    }
+
     @Test func aQuickLogIsHollowUntilWhoIsSet() async throws {
         let (engine, server, own) = makeEngine()
         server.externalConsent(own, true)

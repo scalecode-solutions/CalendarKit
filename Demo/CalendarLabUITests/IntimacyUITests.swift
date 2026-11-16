@@ -46,6 +46,16 @@ final class IntimacyUITests: XCTestCase {
                        "\(e) \(present ? "never said" : "still says") \(label): \(e.label)")
     }
 
+    /// Who is one dropdown (Not set · Solo · the partners): choose one.
+    func chooseWho(_ choice: String) {
+        let who = app.buttons["who"].firstMatch
+        XCTAssert(who.waitForExistence(timeout: 5), "no Who dropdown")
+        who.tap()
+        let option = app.buttons[choice].firstMatch
+        XCTAssert(option.waitForExistence(timeout: 5), "no \(choice) in Who")
+        option.tap()
+    }
+
     func flip(_ s: XCUIElement) {
         s.switches.firstMatch.exists ? s.switches.firstMatch.tap() : s.tap()
     }
@@ -145,14 +155,15 @@ final class IntimacyUITests: XCTestCase {
         entry.tap()
         XCTAssert(app.staticTexts["Pick who, or Solo. Until then it shows as a hollow heart."].waitForExistence(timeout: 5),
                   "a quick log doesn't ask who")
-        flip(app.switches["Solo"])
+        chooseWho("Solo")
         app.buttons["Save"].tap()
 
         // Reopened: who is set, so the prompt is gone.
         XCTAssert(entry.waitForExistence(timeout: 5))
         entry.tap()
-        XCTAssert(app.switches["Solo"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.switches["Solo"].value as? String, "1", "Solo didn't stick")
+        let who = app.buttons["who"].firstMatch
+        XCTAssert(who.waitForExistence(timeout: 5))
+        XCTAssert(who.label.contains("Solo") || (who.value as? String) == "Solo", "Solo didn't stick: \(who.label)")
         XCTAssertFalse(app.staticTexts["Pick who, or Solo. Until then it shows as a hollow heart."].exists)
         reveal(app.buttons["Delete entry"]).tap()
         let confirm = app.buttons["Delete"].firstMatch
@@ -178,7 +189,7 @@ final class IntimacyUITests: XCTestCase {
         intimate.tap()
         XCTAssertFalse(app.buttons["Add a partner"].exists, "the editor still adds partners")
         XCTAssert(app.staticTexts["noPartners"].waitForExistence(timeout: 5), "no line saying where partners are added")
-        flip(app.switches["Solo"])
+        chooseWho("Solo")
         shot("i3-editor-no-partners")
         app.buttons["Save"].tap()
         waitForCount(before + 1)
