@@ -98,6 +98,8 @@ struct PairSettings: View {
                 Section {
                     NavigationLink("Labels") { LabelsView(engine: engine, pairID: pairID).calendarAccent(engine.accentColor) }
                     NavigationLink("Activity") { ActivityView(engine: engine, pair: c).calendarAccent(engine.accentColor) }
+                    NavigationLink("Privacy") { PairPrivacySheet(engine: engine, calendar: c) }
+                        .accessibilityIdentifier("pair.privacy")
                 }
             }
             .calendarBackdrop(engine)
