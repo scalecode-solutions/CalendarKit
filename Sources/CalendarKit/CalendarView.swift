@@ -23,16 +23,46 @@ public struct CalendarView: View {
     /// The last view used, which "Opens on: Last used" reopens.
     @AppStorage(CalendarMode.storageKey) private var savedMode: CalendarMode = .month
     @AppStorage(CalendarOpensOn.storageKey) private var opensOn: CalendarOpensOn = .lastUsed
+    /// The host's focus, when it owns it (the picker is hidden then).
+    private let hostFocus: Binding<CalFocus>?
+    /// The kit's own focus, when the host passes none: remembered per account.
+    @State private var ownFocus: CalFocus
 
     private let zone = TimeZone.current
     private let firstWeekday = Calendar.current.firstWeekday
 
-    public init(engine: CalendarEngine, appearance: CalendarAppearance = .standard) {
+    /// `focus`: nil (the default) lets the kit own which pairs are on screen,
+    /// with its own picker (Everyone, each person, the hidden ones), remembered
+    /// per account. A binding hands it to the host and hides the picker: a
+    /// conversation passes `.constant(.person(theirID))`.
+    public init(engine: CalendarEngine, appearance: CalendarAppearance = .standard, focus: Binding<CalFocus>? = nil) {
         self.engine = engine
         self.appearance = appearance
+        self.hostFocus = focus
         let today = CalDate(Date(), in: .current)
         _month = State(initialValue: (today.year, today.month))
         _mode = State(initialValue: CalendarOpensOn.startMode(.standard))
+        _ownFocus = State(initialValue: CalFocus(stored: UserDefaults.standard.string(forKey: CalFocus.key(engine.config.currentUserID))))
+    }
+
+    private var focus: CalFocus { hostFocus?.wrappedValue ?? ownFocus }
+
+    private func choose(_ f: CalFocus) {
+        withAnimation(.snappy) { ownFocus = f }
+        UserDefaults.standard.set(f.stored, forKey: CalFocus.key(engine.config.currentUserID))
+    }
+
+    /// The pair in focus, if one is (shown even before the server has it).
+    private var focusedPair: CalCalendar? {
+        guard case .person(let id) = focus else { return nil }
+        return engine.pair(with: id)
+    }
+
+    /// What the focus puts on screen: one pair (hidden or not) colored by who
+    /// added what, or every pair that isn't hidden.
+    private var scope: CalScope {
+        guard case .person = focus else { return .everyone }
+        return CalScope(only: Set(focusedPair.map { [$0.id] } ?? []), byAuthor: true)
     }
 
 
@@ -44,7 +74,9 @@ public struct CalendarView: View {
     private var byDay: [CalDate: [CalOccurrence]] {
         _ = engine.revision
         let days = layout.weeks.flatMap { $0 }
-        return DayIndex.group(engine.occurrences(from: days.first!, through: days.last!, zone: zone),
+        let s = scope
+        return DayIndex.group(engine.occurrences(from: days.first!, through: days.last!, zone: zone,
+                                                 only: s.only, byAuthor: s.byAuthor),
                               from: days.first!, through: days.last!, zone: zone)
     }
 
@@ -56,11 +88,14 @@ public struct CalendarView: View {
                     NoticeBanner(notice: n) { engine.dismissNotice(n) }
                 }
                 controls
-                if engine.calendars.count > 1 { PeopleBar(engine: engine) }
+                if hostFocus == nil && !engine.calendars.isEmpty {
+                    PeopleBar(engine: engine, focus: focus, choose: choose)
+                }
+                if let p = focusedPair, p.frozen || !p.visible { PairStateBanner(engine: engine, pair: p) }
                 switch mode {
                 case .month: monthContent
                 case .agenda:
-                    AgendaList(engine: engine, appearance: appearance, zone: zone,
+                    AgendaList(engine: engine, appearance: appearance, zone: zone, scope: scope,
                                showOwners: showOwners, open: { detail = $0 }, openDay: { openDay = $0 })
                 }
             }
@@ -70,7 +105,7 @@ public struct CalendarView: View {
         .eventSheets(engine: engine, editor: $editor, detail: $detail)
         .navigationDestination(item: $openDay) { day in
             DayView(engine: engine, appearance: appearance, zone: zone, day: day,
-                    showOwners: showOwners, occurrences: dayOccurrences)
+                    showOwners: showOwners, inPair: focusedPair?.id, occurrences: dayOccurrences)
         }
         .onChange(of: mode) { _, m in
             // Only "Last used" remembers the switch; a fixed choice lasts for the visit.
@@ -78,13 +113,14 @@ public struct CalendarView: View {
         }
     }
 
-    /// Owners are shown on rows when more than one calendar is on screen.
-    private var showOwners: Bool { engine.calendars.filter(\.visible).count > 1 }
+    /// Rows show a badge when it tells something: whose pair (more than one
+    /// on screen), or who added it (inside one pair).
+    private var showOwners: Bool { scope.byAuthor || engine.calendars.filter(\.visible).count > 1 }
 
-    /// One day's occurrences: the same set the grid draws, so anything that
-    /// narrows what's on screen narrows the day view too, in one place.
+    /// One day's occurrences: the same set the grid draws, so the focus
+    /// narrows the day view too, in one place.
     private func dayOccurrences(_ day: CalDate) -> [CalOccurrence] {
-        DayIndex.occurrences(on: day, engine: engine, zone: zone)
+        DayIndex.occurrences(on: day, engine: engine, zone: zone, scope: scope)
     }
 
     /// The kit's own control row: Month / Agenda, and "+".
@@ -97,14 +133,14 @@ public struct CalendarView: View {
             .pickerStyle(.segmented)
             .frame(maxWidth: 220)
             Spacer()
-            Button { editor = .new(today) } label: {
+            Button { editor = .new(today, in: focusedPair?.id) } label: {
                 Image(systemName: "plus").font(.body.weight(.semibold)).frame(width: 22, height: 22)
                     .foregroundStyle(CalOnTint(engine.accentColor))
             }
             .buttonStyle(.glassProminent)
             .buttonBorderShape(.circle)
             .accessibilityLabel(appearance.newEvent)
-            .disabled(engine.writableCalendars.isEmpty)
+            .disabled(engine.writableCalendars.isEmpty || focusedPair?.frozen == true)
             // A fixed-size control: past this, VoiceOver's large content
             // viewer shows it instead of the glyph outgrowing its circle.
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
@@ -247,6 +283,7 @@ struct AgendaList: View {
     let engine: CalendarEngine
     let appearance: CalendarAppearance
     let zone: TimeZone
+    let scope: CalScope
     let showOwners: Bool
     let open: (CalOccurrence) -> Void
     /// A day header was tapped: open that day.
@@ -258,7 +295,8 @@ struct AgendaList: View {
     private var groups: [(CalDate, [CalOccurrence])] {
         _ = engine.revision
         let through = today.adding(days: days - 1)
-        let index = DayIndex.group(engine.occurrences(from: today, through: through, zone: zone),
+        let index = DayIndex.group(engine.occurrences(from: today, through: through, zone: zone,
+                                                      only: scope.only, byAuthor: scope.byAuthor),
                                    from: today, through: through, zone: zone)
         return index.keys.sorted().map { ($0, index[$0]!) }
     }
@@ -291,7 +329,8 @@ struct AgendaList: View {
                                 // the first (the second day showed a blank gap).
                                 ForEach(occ.map { AgendaItem(day: day, occurrence: $0) }) { item in
                                     Button { open(item.occurrence) } label: {
-                                        AgendaRow(occurrence: item.occurrence, day: day, engine: engine, showOwner: showOwners)
+                                        AgendaRow(occurrence: item.occurrence, day: day, engine: engine, showOwner: showOwners,
+                                                  inPair: scope.byAuthor)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -432,6 +471,7 @@ struct AgendaRow: View {
     let day: CalDate
     let engine: CalendarEngine
     let showOwner: Bool
+    var inPair = false
     @ScaledMetric(relativeTo: .subheadline) private var timeWidth: CGFloat = 64
 
     var body: some View {
@@ -454,7 +494,7 @@ struct AgendaRow: View {
             if occurrence.seriesID != nil {
                 Image(systemName: "repeat").font(.caption).foregroundStyle(.tertiary).accessibilityLabel("Repeats")
             }
-            if showOwner, let who = AuthorBadge.author(of: occurrence, engine: engine) { who }
+            if showOwner, let who = AuthorBadge.author(of: occurrence, engine: engine, inPair: inPair) { who }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -481,9 +521,10 @@ enum DayIndex {
     /// One day's occurrences, everything that touches it (a multi-day or
     /// all-day event shows on each of its days), in the order the grid uses.
     @MainActor
-    static func occurrences(on day: CalDate, engine: CalendarEngine, zone: TimeZone) -> [CalOccurrence] {
+    static func occurrences(on day: CalDate, engine: CalendarEngine, zone: TimeZone, scope: CalScope = .everyone) -> [CalOccurrence] {
         _ = engine.revision
-        return group(engine.occurrences(from: day, through: day, zone: zone), from: day, through: day, zone: zone)[day] ?? []
+        return group(engine.occurrences(from: day, through: day, zone: zone, only: scope.only, byAuthor: scope.byAuthor),
+                     from: day, through: day, zone: zone)[day] ?? []
     }
 
     static func group(_ occ: [CalOccurrence], from: CalDate, through: CalDate, zone: TimeZone) -> [CalDate: [CalOccurrence]] {
@@ -650,33 +691,89 @@ struct AuthorBadge: View {
             .accessibilityLabel(addedByOther ? "Added by \(name)" : name)
     }
 
+    /// Across every pair: whose pair it's on (the other person). Inside one
+    /// pair: who added it (you, or them).
     @MainActor
-    static func author(of o: CalOccurrence, engine: CalendarEngine, size: CGFloat = 22) -> AuthorBadge? {
-        let owner = o.calendar.ownerID
-        if o.author != owner {
-            let person = engine.people[o.author]
-            let theirs = engine.calendars.first { $0.ownerID == o.author }
-            let me = o.author == engine.config.currentUserID
-            return AuthorBadge(contact: person, name: me ? "My calendar" : (person?.name ?? theirs.map(engine.displayName) ?? "Someone"),
-                               tint: theirs?.displayColor ?? .gray, addedByOther: true, size: size)
+    static func author(of o: CalOccurrence, engine: CalendarEngine, inPair: Bool = false, size: CGFloat = 22) -> AuthorBadge? {
+        let me = engine.config.currentUserID
+        guard inPair else {
+            return AuthorBadge(contact: engine.person(of: o.calendar), name: engine.displayName(o.calendar),
+                               tint: o.calendar.displayColor, addedByOther: false, size: size)
         }
-        return AuthorBadge(contact: engine.owner(of: o.calendar), name: engine.displayName(o.calendar),
-                           tint: o.calendar.displayColor, addedByOther: false, size: size)
+        if o.author == me {
+            return AuthorBadge(contact: engine.people[me], name: "you", tint: engine.accentColor, addedByOther: true, size: size)
+        }
+        return AuthorBadge(contact: engine.people[o.author], name: engine.displayName(o.calendar),
+                           tint: o.calendar.displayColor, addedByOther: true, size: size)
     }
 }
 
-/// One chip per calendar you can see, yours first: tap to show or hide it.
-/// The shared-calendar apps' signature: who's on screen, at a glance.
+/// Which pairs are on screen: all of them, or one person's. Local to this
+/// screen (and remembered on the device per account when the kit owns it);
+/// it never changes the synced show/hide prefs.
+public enum CalFocus: Hashable, Sendable {
+    /// Every pair that isn't hidden.
+    case everyone
+    /// The pair with this person, hidden or not.
+    case person(UUID)
+
+    var stored: String {
+        switch self {
+        case .everyone: "everyone"
+        case .person(let id): id.uuidString
+        }
+    }
+
+    init(stored: String?) {
+        self = stored.flatMap(UUID.init(uuidString:)).map(CalFocus.person) ?? .everyone
+    }
+
+    static func key(_ user: UUID) -> String { "CalendarKit.focus.\(user.uuidString)" }
+}
+
+/// What a focus puts on screen.
+struct CalScope: Equatable {
+    /// nil: every pair that isn't hidden. Else these pairs, hidden or not.
+    var only: Set<UUID>?
+    /// Inside one pair: color and badge rows by who added them.
+    var byAuthor: Bool
+
+    static let everyone = CalScope(only: nil, byAuthor: false)
+}
+
+/// The focus picker the kit shows when it owns the focus: Everyone, then a
+/// chip per shown pair, then the hidden ones in a menu.
 struct PeopleBar: View {
     let engine: CalendarEngine
+    let focus: CalFocus
+    let choose: (CalFocus) -> Void
+
+    private var shown: [CalCalendar] { engine.calendars.filter(\.visible) }
+    private var hidden: [CalCalendar] { engine.calendars.filter { !$0.visible } }
 
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
-                ForEach(engine.calendars) { c in
-                    PersonChip(calendar: c, name: name(c), contact: engine.owner(of: c)) {
-                        withAnimation(.snappy) { engine.setVisible(c, !c.visible) }
+                FocusChip(title: "Everyone", contact: nil, tint: engine.accentColor, selected: focus == .everyone,
+                          systemImage: "person.2.fill") { choose(.everyone) }
+                ForEach(shown) { c in
+                    FocusChip(title: firstName(c), contact: engine.person(of: c), tint: c.displayColor,
+                              selected: focus == .person(c.otherID)) { choose(.person(c.otherID)) }
+                }
+                if !hidden.isEmpty {
+                    Menu {
+                        ForEach(hidden) { c in
+                            Button(engine.displayName(c)) { choose(.person(c.otherID)) }
+                        }
+                    } label: {
+                        Text("Hidden (\(hidden.count))")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background { Capsule().fill(.quaternary) }
                     }
+                    .accessibilityLabel("Hidden calendars, \(hidden.count)")
                 }
             }
             .padding(.horizontal, 16)
@@ -685,47 +782,72 @@ struct PeopleBar: View {
         .scrollIndicators(.hidden)
     }
 
-    private func name(_ c: CalCalendar) -> String {
-        if c.isOwn { return "Me" }
-        let full = engine.owner(of: c)?.name ?? engine.displayName(c)
+    private func firstName(_ c: CalCalendar) -> String {
+        let full = engine.displayName(c)
         return full.split(separator: " ").first.map(String.init) ?? full
     }
 }
 
-struct PersonChip: View {
-    let calendar: CalCalendar
-    let name: String
+struct FocusChip: View {
+    let title: String
     let contact: CalContact?
-    let toggle: () -> Void
+    let tint: CalColor
+    let selected: Bool
+    var systemImage: String? = nil
+    let choose: () -> Void
 
     var body: some View {
-        Button(action: toggle) {
+        Button(action: choose) {
             HStack(spacing: 6) {
-                CalAvatar(contact: contact, fallbackName: calendar.isOwn ? "My calendar" : name,
-                          tint: calendar.displayColor, size: 22)
-                    .saturation(calendar.visible ? 1 : 0)
-                Text(name)
+                if let systemImage {
+                    Image(systemName: systemImage).font(.caption.weight(.semibold))
+                        .frame(width: 22, height: 22)
+                        .foregroundStyle(CalOnTint(tint))
+                        .background { Circle().fill(CalTint(tint)) }
+                } else {
+                    CalAvatar(contact: contact, fallbackName: title, tint: tint, size: 22)
+                }
+                Text(title)
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(calendar.visible ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                    .strikethrough(!calendar.visible, color: .secondary)
+                    .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
             }
             .padding(.leading, 4)
             .padding(.trailing, 12)
             .padding(.vertical, 4)
             .background {
-                Capsule().fill(calendar.visible ? AnyShapeStyle(CalTint(calendar.displayColor).opacity(0.18))
-                                                : AnyShapeStyle(.quaternary))
+                Capsule().fill(selected ? AnyShapeStyle(CalTint(tint).opacity(0.18)) : AnyShapeStyle(.quaternary))
             }
             .overlay {
-                Capsule().strokeBorder(calendar.visible ? AnyShapeStyle(CalTint(calendar.displayColor).opacity(0.6))
-                                                        : AnyShapeStyle(.clear), lineWidth: 1)
+                Capsule().strokeBorder(selected ? AnyShapeStyle(CalTint(tint).opacity(0.6)) : AnyShapeStyle(.clear), lineWidth: 1)
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(calendar.isOwn ? "My calendar" : "\(name)'s calendar")
-        .accessibilityValue(calendar.visible ? "Shown" : "Hidden")
-        .accessibilityHint("Shows or hides it")
-        .accessibilityAddTraits(calendar.visible ? .isSelected : [])
+        .accessibilityLabel(title == "Everyone" ? "Everyone" : "\(title)'s calendar")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// Over a focused pair that's hidden or frozen: says so, and for a hidden
+/// one offers to show it again.
+struct PairStateBanner: View {
+    let engine: CalendarEngine
+    let pair: CalCalendar
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: pair.frozen ? "lock.fill" : "eye.slash").foregroundStyle(.secondary)
+            Text(pair.frozen ? "You two aren't friends any more, so this calendar is read-only."
+                             : "You hid this calendar.")
+                .font(.subheadline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if !pair.visible {
+                Button("Show it again") { engine.setHidden(pair, false) }
+                    .font(.subheadline.weight(.semibold))
+            }
+        }
+        .padding(12)
+        .calendarCard(cornerRadius: 18)
+        .padding(.horizontal, 12)
     }
 }
 
@@ -747,7 +869,6 @@ struct NoticeBanner: View {
     }
 }
 
-/// What the editor sheet is for.
 /// The editor and an event's detail, as sheets. The detail's Edit closes the
 /// detail and opens the editor once it has gone, so there's one sheet at a
 /// time. Shared by the calendar and the day view, so each owns its sheets.
@@ -821,15 +942,17 @@ struct FilledCardButtonStyle: ButtonStyle {
     }
 }
 
+/// What the editor sheet is for.
 enum EditorRequest: Identifiable {
-    case new(CalDate)
+    /// A new event on a day, in a pair when one is in focus.
+    case new(CalDate, in: UUID? = nil)
     case event(CalEvent)
     case occurrence(CalOccurrence)
     case following(CalOccurrence)
 
     var id: String {
         switch self {
-        case .new(let d): "new-\(d)"
+        case .new(let d, let c): "new-\(d)-\(c?.uuidString ?? "")"
         case .event(let e): "event-\(e.id)"
         case .occurrence(let o): "occ-\(o.id)"
         case .following(let o): "fol-\(o.id)"

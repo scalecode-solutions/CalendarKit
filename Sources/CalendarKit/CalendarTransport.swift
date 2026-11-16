@@ -8,7 +8,8 @@ public enum CalTransportError: Error, Sendable, Equatable {
     case notAuthenticated
     /// It doesn't exist, or the caller may not know it does.
     case notFound
-    /// The caller can see the calendar but not change it.
+    /// The calendar can't be changed now: its two people aren't friends any
+    /// more (a frozen pair). The message is for people.
     case forbidden(String)
     /// Someone changed it first. `current` is the server's copy now.
     case conflict(current: CalEvent?)
@@ -16,7 +17,7 @@ public enum CalTransportError: Error, Sendable, Equatable {
     case invalid(String)
     /// That id or occurrence is already taken.
     case exists(String)
-    /// A cap was reached (events, labels, shares).
+    /// A cap was reached (events, labels).
     case limit
     /// Too many writes: try again shortly.
     case slowDown
@@ -55,14 +56,13 @@ public protocol CalendarTransport: Sendable {
     func setCalendarPref(calendarID: UUID, visible: Bool, color: CalColor) async throws
     func listContacts() async throws -> [CalContact]
 
-    // Owner only.
-    func updateCalendar(name: String?, color: CalColor?) async throws -> CalCalendar
-    func saveLabel(id: UUID, name: String, color: CalColor) async throws -> CalLabel
+    /// Makes sure the caller's pair calendar with `otherID` exists on the
+    /// server, and returns it (idempotent). NotFound when the two aren't friends.
+    func openPair(otherID: UUID) async throws -> CalCalendar
+
+    func saveLabel(id: UUID, calendarID: UUID, name: String, color: CalColor) async throws -> CalLabel
     func deleteLabel(id: UUID) async throws
-    func createGrant(granteeID: UUID, role: CalRole, expiresAt: Date?, label: String) async throws -> CalGrant
-    func revokeGrant(id: UUID) async throws
-    func listGrants() async throws -> [CalGrant]
-    func listActivity(cursor: String?, limit: Int) async throws -> (rows: [CalActivity], next: String?)
+    func listActivity(calendarID: UUID, cursor: String?, limit: Int) async throws -> (rows: [CalActivity], next: String?)
 }
 
 public extension CalendarTransport {
@@ -207,18 +207,20 @@ public struct ConnectCalendarTransport: CalendarTransport {
         }
     }
 
-    // MARK: owner
+    // MARK: pairs
 
-    public func updateCalendar(name: String?, color: CalColor?) async throws -> CalCalendar {
-        var req = Calendar_V1_UpdateCalendarRequest()
-        if let name { req.name = name }
-        if let color { req.color = color.rawValue }
-        return try Wire.calendar(value(await client.updateCalendar(request: req, headers: try await headers())).calendar)
+    public func openPair(otherID: UUID) async throws -> CalCalendar {
+        var req = Calendar_V1_OpenPairRequest()
+        req.otherID = Wire.id(otherID)
+        return try Wire.calendar(value(await client.openPair(request: req, headers: try await headers())).calendar)
     }
 
-    public func saveLabel(id: UUID, name: String, color: CalColor) async throws -> CalLabel {
+    // MARK: labels and history
+
+    public func saveLabel(id: UUID, calendarID: UUID, name: String, color: CalColor) async throws -> CalLabel {
         var req = Calendar_V1_SaveLabelRequest()
         req.id = Wire.id(id)
+        req.calendarID = Wire.id(calendarID)
         req.name = name
         req.color = color.rawValue
         return try Wire.label(value(await client.saveLabel(request: req, headers: try await headers())).label)
@@ -230,27 +232,9 @@ public struct ConnectCalendarTransport: CalendarTransport {
         _ = try value(await client.deleteLabel(request: req, headers: try await headers()))
     }
 
-    public func createGrant(granteeID: UUID, role: CalRole, expiresAt: Date?, label: String) async throws -> CalGrant {
-        var req = Calendar_V1_CreateGrantRequest()
-        req.granteeID = Wire.id(granteeID)
-        req.role = role == .edit ? .edit : .view
-        req.expiresAt = expiresAt.map(Wire.ms) ?? 0
-        req.label = label
-        return try Wire.grant(value(await client.createGrant(request: req, headers: try await headers())).grant)
-    }
-
-    public func revokeGrant(id: UUID) async throws {
-        var req = Calendar_V1_RevokeGrantRequest()
-        req.grantID = Wire.id(id)
-        _ = try value(await client.revokeGrant(request: req, headers: try await headers()))
-    }
-
-    public func listGrants() async throws -> [CalGrant] {
-        try value(await client.listGrants(request: .init(), headers: try await headers())).grants.map(Wire.grant)
-    }
-
-    public func listActivity(cursor: String?, limit: Int) async throws -> (rows: [CalActivity], next: String?) {
+    public func listActivity(calendarID: UUID, cursor: String?, limit: Int) async throws -> (rows: [CalActivity], next: String?) {
         var req = Calendar_V1_ListActivityRequest()
+        req.calendarID = Wire.id(calendarID)
         req.cursor = cursor ?? ""
         req.limit = Int32(limit)
         let r = try value(await client.listActivity(request: req, headers: try await headers()))
@@ -287,15 +271,6 @@ enum Wire {
     }
 
     static func color(_ s: String) -> CalColor { CalColor(rawValue: s) ?? .none }
-
-    static func role(_ r: Calendar_V1_Role) throws -> CalRole {
-        switch r {
-        case .owner: return .owner
-        case .edit: return .edit
-        case .view: return .view
-        default: throw CalTransportError.badResponse("unknown role")
-        }
-    }
 
     // recurrence
 
@@ -398,19 +373,12 @@ enum Wire {
     // the rest
 
     static func calendar(_ w: Calendar_V1_Calendar) throws -> CalCalendar {
-        CalCalendar(id: try uuid(w.id), ownerID: try uuid(w.ownerID), name: w.name, color: color(w.color),
-                    role: try role(w.role), rev: w.rev,
-                    grantExpiresAt: w.grantExpiresAt > 0 ? date(w.grantExpiresAt) : nil,
+        CalCalendar(id: try uuid(w.id), otherID: try uuid(w.otherID), name: w.name, rev: w.rev, frozen: w.frozen,
                     visible: w.visible, prefColor: color(w.prefColor))
     }
 
     static func label(_ w: Calendar_V1_Label) throws -> CalLabel {
         CalLabel(id: try uuid(w.id), calendarID: try uuid(w.calendarID), name: w.name, color: color(w.color), rev: w.rev)
-    }
-
-    static func grant(_ w: Calendar_V1_Grant) throws -> CalGrant {
-        CalGrant(id: try uuid(w.id), granteeID: try uuid(w.granteeID), role: try role(w.role),
-                 createdAt: date(w.createdAt), expiresAt: w.expiresAt > 0 ? date(w.expiresAt) : nil, label: w.label)
     }
 
     static func syncPage(_ w: Calendar_V1_SyncResponse) throws -> CalSyncPage {

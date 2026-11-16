@@ -28,7 +28,9 @@ public final class CalendarEngine {
         case failed(String)
     }
 
-    /// Every calendar the person can see (own first), with their display prefs.
+    /// The person's pair calendars, one per friend, by the other person's name:
+    /// those on the server, and, for friends nobody has opened one with yet,
+    /// one shown from the contact list at its computed id (`listed` false).
     public private(set) var calendars: [CalCalendar] = []
     /// Labels of every visible calendar, by name.
     public private(set) var labels: [CalLabel] = []
@@ -64,10 +66,24 @@ public final class CalendarEngine {
         self.transport = transport ?? config.transport
     }
 
-    public var ownCalendar: CalCalendar? { calendars.first(where: \.isOwn) }
+    /// Pairs the person may add to: every one that isn't frozen.
+    public var writableCalendars: [CalCalendar] { calendars.filter { !$0.frozen } }
 
-    /// Calendars the person may add events to.
-    public var writableCalendars: [CalCalendar] { calendars.filter { $0.role.canWrite } }
+    /// The person's pair calendar with someone (shown even before it exists on
+    /// the server), if they're a friend or were.
+    public func pair(with person: UUID) -> CalCalendar? { calendars.first { $0.otherID == person } }
+
+    /// The person's own color, the kit's accent. Kept on this device.
+    public var myColor: CalColor = CalendarEngine.storedMyColor() {
+        didSet {
+            UserDefaults.standard.set(myColor.rawValue, forKey: Self.myColorKey)
+            publish()
+        }
+    }
+    static let myColorKey = "CalendarKit.myColor"
+    static func storedMyColor() -> CalColor {
+        CalColor(rawValue: UserDefaults.standard.string(forKey: myColorKey) ?? "") ?? .none
+    }
 
     // MARK: lifecycle
 
@@ -144,8 +160,15 @@ public final class CalendarEngine {
     private func openStore() {
         guard store == nil, !isWiped else { return }
         do {
-            store = try CalendarStore(userID: config.currentUserID, appGroup: config.appGroup,
-                                      directory: config.storeDirectory, inMemory: storeInMemory)
+            let opened = try CalendarStore(userID: config.currentUserID, appGroup: config.appGroup,
+                                           directory: config.storeDirectory, inMemory: storeInMemory)
+            // From before pair calendars (0.7.0): its calendars and queued
+            // writes can't be read, and their server rows are gone too.
+            if opened.holdsAnOldModel() {
+                log.notice("store held the per-person model: wiped for pair calendars")
+                opened.wipeAll()
+            }
+            store = opened
             storeOnDisk = true
             lockedNoticeShown = false
         } catch {
@@ -179,8 +202,20 @@ public final class CalendarEngine {
         // compares equal and doesn't rebuild the views. New or changed ones are
         // remembered, so the next friend doesn't move them.
         let stored = store.calendars().map(\.0)
-        let cals = CalCalendar.assignAutoColors(stored)
-        for (was, now) in zip(stored, cals) where was.autoColor != now.autoColor {
+        // Friends nobody has opened a pair with yet: shown at the pair's id.
+        let me = config.currentUserID
+        let have = Set(stored.map(\.otherID))
+        var unopened: [CalCalendar] = []
+        for p in people.values where p.id != me && !have.contains(p.id) {
+            var c = CalCalendar(id: CalPairID.make(me, p.id), otherID: p.id)
+            c.listed = false
+            unopened.append(c)
+        }
+        let all = (stored + unopened).sorted {
+            (displayName($0).lowercased(), $0.id.uuidString) < (displayName($1).lowercased(), $1.id.uuidString)
+        }
+        let cals = CalCalendar.assignAutoColors(all, own: myColor)
+        for now in cals where stored.contains(where: { $0.id == now.id && $0.autoColor != now.autoColor }) {
             store.updateCalendar(now.id) { $0.autoColor = now.autoColor }
         }
         if cals != calendars { calendars = cals; changed = true }
@@ -205,36 +240,43 @@ public final class CalendarEngine {
         log.debug("contacts: \(list.count, privacy: .public)")
         people = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         peopleLoadedAt = Date()
+        publish() // friends without a pair yet show up as pairs
     }
 
-    /// What to call a calendar: its own name, else its owner's.
+    /// What to call a pair: its own name, else the other person's, else
+    /// "Someone" (a friend no longer, or an account gone).
     public func displayName(_ c: CalCalendar) -> String {
         if !c.name.isEmpty { return c.name }
-        if let p = people[c.ownerID] { return p.name }
-        return c.isOwn ? "My calendar" : "Shared calendar"
+        if let p = people[c.otherID], !p.name.isEmpty { return p.name }
+        return "Someone"
     }
 
-    /// The owner of a calendar, if the directory knows them.
-    public func owner(of c: CalCalendar) -> CalContact? { people[c.ownerID] }
+    /// The other person in a pair, if the directory knows them (nil for
+    /// someone who isn't a friend any more).
+    public func person(of c: CalCalendar) -> CalContact? { people[c.otherID] }
 
     // MARK: reading
 
     /// What to draw between two days (inclusive), in the viewer's zone, from
-    /// the calendars they've chosen to show (pass `includeHidden` for all).
+    /// the pairs they've chosen to show (pass `includeHidden` for all). `only`
+    /// narrows it to some pairs, hidden or not (a focused pair still shows);
+    /// `byAuthor` colors by who added each event (inside one pair).
     public func occurrences(from: CalDate, through: CalDate, zone: TimeZone = .current,
-                            includeHidden: Bool = false) -> [CalOccurrence] {
+                            includeHidden: Bool = false, only: Set<UUID>? = nil,
+                            byAuthor: Bool = false) -> [CalOccurrence] {
         guard let store else { return [] }
         // Built once per (cache contents, published state, range): a view body
         // pass that only moved the selection, or a sync that changed nothing,
         // reuses it (R22).
         let key = OccurrenceKey(events: store.eventChanges, revision: revision, from: from, through: through,
-                                zone: zone.identifier, hidden: includeHidden)
+                                zone: zone.identifier, hidden: includeHidden, only: only, byAuthor: byAuthor)
         if let hit = occurrenceCache[key] { return hit }
         if let any = occurrenceCache.keys.first, any.events != key.events || any.revision != key.revision {
             occurrenceCache.removeAll(keepingCapacity: true)
         }
         if occurrenceCache.count >= 8 { occurrenceCache.removeAll(keepingCapacity: true) }
-        let built = buildOccurrences(store, from: from, through: through, zone: zone, includeHidden: includeHidden)
+        let built = buildOccurrences(store, from: from, through: through, zone: zone, includeHidden: includeHidden,
+                                     only: only, byAuthor: byAuthor)
         occurrenceCache[key] = built
         return built
     }
@@ -243,12 +285,13 @@ public final class CalendarEngine {
         let events: Int, revision: Int
         let from: CalDate, through: CalDate
         let zone: String, hidden: Bool
+        let only: Set<UUID>?, byAuthor: Bool
     }
     private var occurrenceCache: [OccurrenceKey: [CalOccurrence]] = [:]
 
     private func buildOccurrences(_ store: CalendarStore, from: CalDate, through: CalDate, zone: TimeZone,
-                                  includeHidden: Bool) -> [CalOccurrence] {
-        let cals = calendars.filter { includeHidden || $0.visible }
+                                  includeHidden: Bool, only: Set<UUID>?, byAuthor: Bool) -> [CalOccurrence] {
+        let cals = calendars.filter { c in only.map { $0.contains(c.id) } ?? (includeHidden || c.visible) }
         var events = store.events(in: cals.map(\.id), from: from.adding(days: -1), through: through.adding(days: 1))
         // An occurrence moved outside its series' days (the last one moved past
         // the end, the first before the start) is found by its own days; its
@@ -260,7 +303,8 @@ public final class CalendarEngine {
         return OccurrenceBuilder.build(events: events, exceptions: exceptions,
                                        calendars: Dictionary(uniqueKeysWithValues: cals.map { ($0.id, $0) }),
                                        labels: Dictionary(uniqueKeysWithValues: labels.map { ($0.id, $0) }),
-                                       from: from, through: through, zone: zone)
+                                       from: from, through: through, zone: zone,
+                                       byAuthor: byAuthor ? (config.currentUserID, accentColor) : nil)
     }
 
     public func event(_ id: UUID) -> CalEvent? { store?.event(id) }
@@ -321,7 +365,9 @@ public final class CalendarEngine {
 
     private func apply(_ page: CalSyncPage, to store: CalendarStore) {
         let now = Set(page.calendars.map(\.id))
-        for (c, _) in store.calendars() where !now.contains(c.id) {
+        // A pair this device started on that the server hasn't listed yet
+        // stays: its OpenPair is still queued.
+        for (c, _) in store.calendars() where !now.contains(c.id) && c.listed {
             store.removeCalendar(c.id)
         }
         store.setCalendars(page.calendars)
@@ -499,12 +545,20 @@ public final class CalendarEngine {
         case .pref(let id, let visible, let color):
             try await transport.setCalendarPref(calendarID: id, visible: visible, color: color)
         case .saveLabel(let l):
-            store.putLabel(try live(try await transport.saveLabel(id: l.id, name: l.name, color: l.color)))
+            store.putLabel(try live(try await transport.saveLabel(id: l.id, calendarID: l.calendarID, name: l.name, color: l.color)))
         case .deleteLabel(let id, _):
             try await transport.deleteLabel(id: id)
-        case .updateCalendar(let name, let color):
-            let c = try live(try await transport.updateCalendar(name: name, color: color))
-            store.updateCalendar(c.id) { $0.name = c.name; $0.color = c.color }
+        case .openPair(let other, let id):
+            let c = try live(try await transport.openPair(otherID: other))
+            guard c.id == id else { throw CalTransportError.badResponse("the pair's id isn't the one computed") }
+            // Listed from now on; this device's colour and the local prefs stay.
+            store.updateCalendar(id) { local in
+                var n = c
+                n.autoColor = local.autoColor
+                n.visible = local.visible
+                n.prefColor = local.prefColor
+                local = n
+            }
         }
     }
 
@@ -519,7 +573,9 @@ public final class CalendarEngine {
             if let current { store.put(current, pending: false) }
             message = "Someone else changed \(what) first, so your change wasn't saved."
         case .forbidden?:
-            message = "You can view this calendar but not change it, so \(what) wasn't saved."
+            message = "You two aren't friends any more, so this calendar can't be changed: \(what) wasn't saved."
+        case .notFound? where isOpenPair(w):
+            message = "You can't keep a calendar with this person right now, so your changes weren't saved."
         case .notFound?:
             message = "\(what.prefix(1).uppercased() + what.dropFirst()) is no longer there, so your change wasn't saved."
         case .invalid(let m)?:
@@ -530,6 +586,18 @@ public final class CalendarEngine {
             message = "The calendar server kept failing, so \(what) wasn't saved."
         default:
             message = "\(what.prefix(1).uppercased() + what.dropFirst()) couldn't be saved."
+        }
+        // A pair that can't be written (frozen) or opened (not friends): every
+        // write queued for it would be refused the same way. Drop them all now,
+        // with this one notice, not one per write.
+        if let cal = w.calendarID(lookup: { store.event($0)?.calendarID }),
+           (error as? CalTransportError).map({ if case .forbidden = $0 { return true }; return isOpenPair(w) }) == true {
+            for (pid, other) in store.pending() where other.calendarID(lookup: { store.event($0)?.calendarID }) == cal {
+                store.dropPending(pid)
+                if case .create(let e) = other { store.removeEvent(e.id) }
+                if case .exception(let e) = other { store.removeEvent(e.id) }
+            }
+            if isOpenPair(w) { store.removeCalendar(cal) } // never on the server: nothing to keep
         }
         notices.append(CalNotice(message: message))
         switch w {
@@ -545,6 +613,11 @@ public final class CalendarEngine {
         if let id = w.eventID {
             for (pid, other) in store.pending() where other.eventID == id { store.dropPending(pid) }
         }
+    }
+
+    private func isOpenPair(_ w: PendingWrite) -> Bool {
+        if case .openPair = w { return true }
+        return false
     }
 
     private func refreshPendingFlags(_ store: CalendarStore) {
@@ -597,6 +670,15 @@ public final class CalendarEngine {
     /// Record a local change and push it soon.
     private func commit(_ w: PendingWrite) {
         guard let store else { return }
+        // The first write (or pref) to a pair the server hasn't listed: open it
+        // there first. Only then, never as a sweep over every friend: OpenPair
+        // counts against the write budget.
+        if let id = w.calendarID(lookup: { store.event($0)?.calendarID }),
+           let pair = calendars.first(where: { $0.id == id }), !pair.listed,
+           !store.pending().contains(where: { if case .openPair(_, id) = $0.1 { return true }; return false }) {
+            store.putUnlistedPair(pair)
+            enqueue(.openPair(otherID: pair.otherID, calendarID: id), store: store)
+        }
         enqueue(w, store: store)
         refreshPendingFlags(store)
         store.save()
@@ -759,34 +841,30 @@ public final class CalendarEngine {
     /// Show or hide a calendar on this person's screens.
     public func setVisible(_ calendar: CalCalendar, _ visible: Bool) {
         openStore() // a write before the first refresh must not be lost
+        if !calendar.listed { store?.putUnlistedPair(calendar) }
         store?.updateCalendar(calendar.id) { $0.visible = visible }
         commit(.pref(calendarID: calendar.id, visible: visible, color: calendar.prefColor))
     }
 
-    /// This person's color for a calendar (`.none` = the owner's).
+    /// Hide a pair from this person's screens (the other person never knows),
+    /// or show it again. Nothing on it is deleted.
+    public func setHidden(_ calendar: CalCalendar, _ hidden: Bool) { setVisible(calendar, !hidden) }
+
+    /// This person's color for a pair (`.none` = automatic).
     public func setColor(_ calendar: CalCalendar, _ color: CalColor) {
         openStore() // a write before the first refresh must not be lost
+        if !calendar.listed { store?.putUnlistedPair(calendar) }
         store?.updateCalendar(calendar.id) { $0.prefColor = color }
         commit(.pref(calendarID: calendar.id, visible: calendar.visible, color: color))
     }
 
-    // MARK: owner
-
-    public func renameOwnCalendar(_ name: String?, color: CalColor?) {
-        openStore() // a write before the first refresh must not be lost
-        guard let own = ownCalendar else { return }
-        store?.updateCalendar(own.id) { c in
-            if let name { c.name = name }
-            if let color { c.color = color }
-        }
-        commit(.updateCalendar(name: name, color: color))
-    }
+    // MARK: labels
 
     @discardableResult
-    public func saveLabel(id: UUID = UUID(), name: String, color: CalColor) -> CalLabel? {
+    public func saveLabel(id: UUID = UUID(), in calendar: CalCalendar, name: String, color: CalColor) -> CalLabel? {
         openStore() // a write before the first refresh must not be lost
-        guard let own = ownCalendar else { return nil }
-        let l = CalLabel(id: id, calendarID: own.id, name: name, color: color, rev: 0)
+        guard !calendar.frozen else { return nil }
+        let l = CalLabel(id: id, calendarID: calendar.id, name: name, color: color, rev: 0)
         store?.putLabel(l)
         commit(.saveLabel(l))
         return l
@@ -804,20 +882,15 @@ public final class CalendarEngine {
         commit(.deleteLabel(id: label.id, calendarID: label.calendarID))
     }
 
-    // Sharing is online-only: it needs the server's answer (who, whether allowed).
+    // Online only: they need the server's answer.
 
     public func contacts() async throws -> [CalContact] { try await transport.listContacts() }
-    public func grants() async throws -> [CalGrant] { try await transport.listGrants() }
 
-    @discardableResult
-    public func share(with person: UUID, role: CalRole = .view, until: Date? = nil, note: String = "") async throws -> CalGrant {
-        try await transport.createGrant(granteeID: person, role: role, expiresAt: until, label: note)
-    }
-
-    public func revoke(_ grant: CalGrant) async throws { try await transport.revokeGrant(id: grant.id) }
-
-    public func activity(cursor: String? = nil, limit: Int = 50) async throws -> (rows: [CalActivity], next: String?) {
-        try await transport.listActivity(cursor: cursor, limit: limit)
+    /// A pair's history: both people's changes, newest first. Empty for a pair
+    /// the server doesn't have yet.
+    public func activity(of calendar: CalCalendar, cursor: String? = nil, limit: Int = 50) async throws -> (rows: [CalActivity], next: String?) {
+        guard calendar.listed else { return ([], nil) }
+        return try await transport.listActivity(calendarID: calendar.id, cursor: cursor, limit: limit)
     }
 
     static func describe(_ e: CalTransportError) -> String {

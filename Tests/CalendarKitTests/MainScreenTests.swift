@@ -8,14 +8,13 @@ import Testing
 struct MainScreenTests {
     private func occ(_ title: String, _ color: CalColor, on day: CalDate, days: Int = 1, cal: CalCalendar) -> CalOccurrence {
         let e = CalEvent(id: UUID(), calendarID: cal.id, fields: CalEventFields(title: title, when: .allDay(start: day, end: day.adding(days: days)), color: color),
-                         masterID: nil, originalStart: nil, cancelled: false, createdBy: cal.ownerID, updatedBy: cal.ownerID,
+                         masterID: nil, originalStart: nil, cancelled: false, createdBy: cal.otherID, updatedBy: cal.otherID,
                          createdAt: Date(), updatedAt: Date(), rev: 1, deleted: false)
         return OccurrenceBuilder.build(events: [e], exceptions: [], calendars: [cal.id: cal], labels: [:],
                                        from: day, through: day.adding(days: days - 1), zone: .gmt)[0]
     }
 
-    private let cal = CalCalendar(id: UUID(), ownerID: UUID(), name: "Me", color: .teal, role: .owner, rev: 0,
-                                  grantExpiresAt: nil, visible: true, prefColor: .none)
+    private let cal = CalCalendar(id: UUID(), otherID: UUID(), name: "Them", prefColor: .teal)
 
     /// Up to two titles in a cell; past that, one and "+N" (two lines, always).
     @Test func cellsShowTwoTitlesOrOneAndMore() {

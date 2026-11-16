@@ -14,8 +14,8 @@ struct EventEditorView: View {
         self.engine = engine
         self.request = request
         switch request {
-        case .new(let day):
-            _draft = State(initialValue: CalEventDraft.new(on: day, calendarID: engine.ownCalendar?.id ?? engine.writableCalendars.first?.id))
+        case .new(let day, let pair):
+            _draft = State(initialValue: CalEventDraft.new(on: day, calendarID: Self.defaultCalendar(engine, focused: pair)?.id))
             isNew = true
         case .event(let e):
             _draft = State(initialValue: CalEventDraft(e.fields, calendarID: e.calendarID))
@@ -53,6 +53,13 @@ struct EventEditorView: View {
     }
 
     private var isOccurrence: Bool { if case .occurrence = request { return true }; return false }
+    /// Where a new event goes: the pair in focus, else the first shown pair
+    /// that can take it, else any that can.
+    static func defaultCalendar(_ engine: CalendarEngine, focused: UUID?) -> CalCalendar? {
+        let w = engine.writableCalendars
+        return w.first { $0.id == focused } ?? w.first(where: \.visible) ?? w.first
+    }
+
     private var calendar: CalCalendar? { draft.calendarID.flatMap { engine.calendar($0) } }
 
     var body: some View {
@@ -96,8 +103,7 @@ struct EventEditorView: View {
                 // Who will see it matters when choosing where it goes; once
                 // it's there, saying so on every edit is noise (Frond's audit).
                 if isNew, let calendar {
-                    Text(calendar.isOwn ? "Anyone you've shared your calendar with will see this event."
-                                        : "Everyone who can see \(engine.displayName(calendar)) will see this event.")
+                    Text("You and \(engine.displayName(calendar)) will both see this event, and either of you can change it.")
                 }
             }
             Section("Notes") {

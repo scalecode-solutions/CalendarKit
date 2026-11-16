@@ -13,24 +13,23 @@ struct EventDetailView: View {
 
     private var event: CalEvent { occurrence.event }
     private var series: CalEvent? { occurrence.seriesID.flatMap { engine.event($0) } }
-    private var canWrite: Bool { occurrence.calendar.role.canWrite }
+    /// Frozen pairs (no longer friends) are read-only.
+    private var canWrite: Bool { !occurrence.calendar.frozen }
 
     private var me: UUID { engine.config.currentUserID }
-    private var owner: UUID { occurrence.calendar.ownerID }
-    /// Who put it there, when that isn't the calendar's owner: a partner
-    /// adding to your calendar, or you adding to theirs ("you"). Exactly when
-    /// a row shows the author's avatar instead of the owner's (Frond), so the
-    /// two can't disagree. For an occurrence it's the series' maker.
+    /// Who put it there, when that isn't the person reading: the other one in
+    /// the pair ("Someone" once they're not a friend). Exactly when a row
+    /// shows the author's avatar. For an occurrence it's the series' maker.
     private var addedBy: (name: String, contact: CalContact?)? {
         let a = occurrence.author
-        if a == owner { return nil }
-        if a == me { return ("you", nil) }
-        return engine.people[a].map { ($0.name, $0) }
+        if a == me { return nil }
+        let p = engine.people[a]
+        return (p.map(\.name).flatMap { $0.isEmpty ? nil : $0 } ?? "Someone", p)
     }
-    /// Who changed it last, by the same rule, and when it isn't who added it.
+    /// Who changed it last, when that's the other person and they didn't add it.
     private var changedBy: CalContact? {
         let u = event.updatedBy
-        return u == me || u == owner || u == occurrence.author ? nil : engine.people[u]
+        return u == me || u == occurrence.author ? nil : engine.people[u]
     }
 
     var body: some View {
@@ -43,7 +42,7 @@ struct EventDetailView: View {
             Section {
                 DetailRow(icon: "calendar") {
                     HStack(spacing: 8) {
-                        CalAvatar(contact: engine.owner(of: occurrence.calendar), fallbackName: engine.displayName(occurrence.calendar),
+                        CalAvatar(contact: engine.person(of: occurrence.calendar), fallbackName: engine.displayName(occurrence.calendar),
                                   tint: occurrence.calendar.displayColor, size: 22)
                         Text(engine.displayName(occurrence.calendar))
                     }
@@ -62,7 +61,7 @@ struct EventDetailView: View {
                 if let who = addedBy {
                     DetailRow(icon: "person") {
                         HStack(spacing: 8) {
-                            CalAvatar(contact: who.contact, fallbackName: who.contact == nil ? "My calendar" : who.name,
+                            CalAvatar(contact: who.contact, fallbackName: who.name,
                                       tint: occurrence.calendar.displayColor, size: 22)
                             Text("Added by \(who.name)")
                         }

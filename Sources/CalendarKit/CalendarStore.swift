@@ -191,7 +191,9 @@ enum PendingWrite: Codable, Equatable, Sendable {
     case pref(calendarID: UUID, visible: Bool, color: CalColor)
     case saveLabel(CalLabel)
     case deleteLabel(id: UUID, calendarID: UUID)
-    case updateCalendar(name: String?, color: CalColor?)
+    /// Before the first write to a pair the server hasn't listed: makes sure it
+    /// exists there (writes to it can't land before).
+    case openPair(otherID: UUID, calendarID: UUID)
 
     /// A V1 queue row for a reminder write (`alerts` / `alertDefaults`, the
     /// cases removed in MVCALE-15), by its encoded case name.
@@ -219,7 +221,7 @@ enum PendingWrite: Codable, Equatable, Sendable {
         case .split(_, _, _, let s, _): return s.calendarID
         case .saveLabel(let l): return l.calendarID
         case .deleteLabel(_, let c): return c
-        default: return nil
+        case .pref(let c, _, _), .openPair(_, let c): return c
         }
     }
 }
@@ -301,10 +303,33 @@ final class CalendarStore {
         return rows.compactMap { r in decode(CalCalendar.self, r.payload).map { ($0, r.cursor) } }
     }
 
+    /// The cursors to sync with: pairs the server has listed only. One that
+    /// isn't there yet would come back as gone.
     func cursors() -> [UUID: CalCursor] {
-        Dictionary(uniqueKeysWithValues: ((try? context.fetch(FetchDescriptor<CalendarRecord>())) ?? []).map {
-            ($0.id, CalCursor(rev: $0.cursor, loadFrom: $0.loadFrom))
+        Dictionary(uniqueKeysWithValues: ((try? context.fetch(FetchDescriptor<CalendarRecord>())) ?? []).compactMap { r in
+            guard decode(CalCalendar.self, r.payload)?.listed ?? false else { return nil }
+            return (r.id, CalCursor(rev: r.cursor, loadFrom: r.loadFrom))
         })
+    }
+
+    /// A pair this device has started on before the server listed it (a
+    /// write or a pref went to it): kept, unlisted, until OpenPair lands.
+    func putUnlistedPair(_ c: CalCalendar) {
+        guard calendarRecord(c.id) == nil else { return }
+        var c = c
+        c.listed = false
+        let last = ((try? context.fetch(FetchDescriptor<CalendarRecord>())) ?? []).map(\.position).max() ?? -1
+        context.insert(CalendarRecord(id: c.id, payload: encode(c), cursor: 0, position: last + 1))
+    }
+
+    /// Whether this store holds calendars or queued writes from before pair
+    /// calendars (0.7.0), which this code can't read. Their server rows are
+    /// gone too ("start fresh"), so the caller wipes it.
+    func holdsAnOldModel() -> Bool {
+        let cals = (try? context.fetch(FetchDescriptor<CalendarRecord>())) ?? []
+        if cals.contains(where: { decode(CalCalendar.self, $0.payload) == nil }) { return true }
+        let queue = (try? context.fetch(FetchDescriptor<PendingWriteRecord>())) ?? []
+        return queue.contains { decode(PendingWrite.self, $0.payload) == nil }
     }
 
     private func calendarRecord(_ id: UUID) -> CalendarRecord? {

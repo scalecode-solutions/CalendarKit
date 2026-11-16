@@ -27,8 +27,8 @@ struct RefusedDeleteTests {
         #expect(!shown.contains { $0.when.firstDay == CalDate(2026, 11, 9) }) // still cancelled
     }
 
-    /// The role went to view while offline: the delete is refused and the
-    /// event, still on the server, comes back.
+    /// The pair froze while offline (they unfriended): the delete is refused
+    /// and the event, still on the server, comes back.
     @Test func aForbiddenDeleteBringsTheEventBack() async {
         let (engine, server, own) = makeEngine()
         await engine.refresh()
@@ -36,7 +36,7 @@ struct RefusedDeleteTests {
         await engine.refresh()
         server.set { s in
             let i = s.calendars.firstIndex { $0.id == own }!
-            s.calendars[i].role = .view
+            s.calendars[i].frozen = true
         }
         engine.deleteEvent(engine.event(e.id)!)
         #expect(engine.event(e.id) == nil) // gone at once, optimistically

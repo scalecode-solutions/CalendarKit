@@ -21,7 +21,7 @@ struct StoreProtectionTests {
         let files = [store, URL(fileURLWithPath: store.path + "-wal"), URL(fileURLWithPath: store.path + "-shm")]
         for f in files { try Data("not a database".utf8).write(to: f) }
         let server = FakeServer(me: user)
-        _ = server.addCalendar(owner: user, role: .owner)
+        server.addPair()
         let engine = CalendarEngine(config: CalendarConfig(baseURL: URL(string: "http://fake")!, currentUserID: user,
                                                            tokenProvider: { "t" }, storeDirectory: dir), transport: server)
         return (engine, server, files)
@@ -63,10 +63,11 @@ struct StoreProtectionTests {
         for f in files { try FileManager.default.removeItem(at: f) }
         engine.protectedDataAvailable = { true }
         await engine.refresh()
-        let own = try #require(engine.ownCalendar)
+        let own = try #require(engine.calendars.first)
         _ = engine.addEvent(to: own.id, allDay("Dentist", 2026, 11, 10))
         await engine.refresh()
         #expect(server.get { $0.events.values.map(\.fields.title) } == ["Dentist"])
         #expect(FileManager.default.fileExists(atPath: files[0].path), "the store is on disk, not in memory")
     }
 }
+

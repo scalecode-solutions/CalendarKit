@@ -20,49 +20,6 @@ fileprivate nonisolated struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobu
   typealias Version = _2
 }
 
-/// Role is what the caller may do with a calendar.
-public nonisolated enum Calendar_V1_Role: SwiftProtobuf.Enum, Swift.CaseIterable {
-  public typealias RawValue = Int
-  case unspecified // = 0
-  case owner // = 1
-  case edit // = 2
-  case view // = 3
-  case UNRECOGNIZED(Int)
-
-  public init() {
-    self = .unspecified
-  }
-
-  public init?(rawValue: Int) {
-    switch rawValue {
-    case 0: self = .unspecified
-    case 1: self = .owner
-    case 2: self = .edit
-    case 3: self = .view
-    default: self = .UNRECOGNIZED(rawValue)
-    }
-  }
-
-  public var rawValue: Int {
-    switch self {
-    case .unspecified: return 0
-    case .owner: return 1
-    case .edit: return 2
-    case .view: return 3
-    case .UNRECOGNIZED(let i): return i
-    }
-  }
-
-  // The compiler won't synthesize support with the UNRECOGNIZED case.
-  public static let allCases: [Calendar_V1_Role] = [
-    .unspecified,
-    .owner,
-    .edit,
-    .view,
-  ]
-
-}
-
 public nonisolated enum Calendar_V1_Freq: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case unspecified // = 0
@@ -238,7 +195,7 @@ public nonisolated struct Calendar_V1_Date: Sendable {
   public init() {}
 }
 
-/// Contact is a person the caller may share with.
+/// Contact is a person in the caller's social graph (or the caller).
 public nonisolated struct Calendar_V1_Contact: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -256,7 +213,7 @@ public nonisolated struct Calendar_V1_Contact: Sendable {
   public init() {}
 }
 
-/// Calendar is one calendar the caller can see.
+/// Calendar is one pair calendar the caller is a member of.
 public nonisolated struct Calendar_V1_Calendar: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -264,27 +221,24 @@ public nonisolated struct Calendar_V1_Calendar: Sendable {
 
   public var id: String = String()
 
-  public var ownerID: String = String()
-
-  /// "" = the client shows the owner's name
+  /// "" = the client shows the other member's name
   public var name: String = String()
-
-  /// palette token; "" = default
-  public var color: String = String()
-
-  public var role: Calendar_V1_Role = .unspecified
 
   /// The newest change on this calendar. Equal to the caller's cursor = nothing new.
   public var rev: Int64 = 0
 
-  /// For a calendar shared with the caller: when the share ends (0 = never).
-  public var grantExpiresAt: Int64 = 0
-
-  /// The caller's own display preference for it.
+  /// The caller's own display preference for it (visible = false: hidden for me).
   public var visible: Bool = false
 
-  /// the caller's color override; "" = none
+  /// the caller's color for this pair; "" = automatic
   public var prefColor: String = String()
+
+  /// the other member
+  public var otherID: String = String()
+
+  /// The two aren't friends any more (or one account is gone): readable, every
+  /// write answers PermissionDenied. Back to false the moment they are again.
+  public var frozen: Bool = false
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -937,38 +891,19 @@ public nonisolated struct Calendar_V1_ListContactsResponse: Sendable {
   public init() {}
 }
 
-public nonisolated struct Calendar_V1_UpdateCalendarRequest: Sendable {
+public nonisolated struct Calendar_V1_OpenPairRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var name: String {
-    get {_name ?? String()}
-    set {_name = newValue}
-  }
-  /// Returns true if `name` has been explicitly set.
-  public var hasName: Bool {self._name != nil}
-  /// Clears the value of `name`. Subsequent reads from it will return its default value.
-  public mutating func clearName() {self._name = nil}
-
-  public var color: String {
-    get {_color ?? String()}
-    set {_color = newValue}
-  }
-  /// Returns true if `color` has been explicitly set.
-  public var hasColor: Bool {self._color != nil}
-  /// Clears the value of `color`. Subsequent reads from it will return its default value.
-  public mutating func clearColor() {self._color = nil}
+  public var otherID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
-
-  fileprivate var _name: String? = nil
-  fileprivate var _color: String? = nil
 }
 
-public nonisolated struct Calendar_V1_UpdateCalendarResponse: Sendable {
+public nonisolated struct Calendar_V1_OpenPairResponse: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -1000,6 +935,9 @@ public nonisolated struct Calendar_V1_SaveLabelRequest: Sendable {
   public var name: String = String()
 
   public var color: String = String()
+
+  /// the pair calendar (a new label); an existing one keeps its own
+  public var calendarID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1049,118 +987,7 @@ public nonisolated struct Calendar_V1_DeleteLabelResponse: Sendable {
   public init() {}
 }
 
-/// Grant shares the owner's whole calendar with one person.
-public nonisolated struct Calendar_V1_Grant: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var id: String = String()
-
-  public var granteeID: String = String()
-
-  /// VIEW or EDIT
-  public var role: Calendar_V1_Role = .unspecified
-
-  public var createdAt: Int64 = 0
-
-  /// 0 = no expiry
-  public var expiresAt: Int64 = 0
-
-  /// owner's note
-  public var label: String = String()
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
-public nonisolated struct Calendar_V1_CreateGrantRequest: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var granteeID: String = String()
-
-  /// UNSPECIFIED = VIEW
-  public var role: Calendar_V1_Role = .unspecified
-
-  /// 0 = no expiry
-  public var expiresAt: Int64 = 0
-
-  public var label: String = String()
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
-public nonisolated struct Calendar_V1_CreateGrantResponse: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var grant: Calendar_V1_Grant {
-    get {_grant ?? Calendar_V1_Grant()}
-    set {_grant = newValue}
-  }
-  /// Returns true if `grant` has been explicitly set.
-  public var hasGrant: Bool {self._grant != nil}
-  /// Clears the value of `grant`. Subsequent reads from it will return its default value.
-  public mutating func clearGrant() {self._grant = nil}
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-
-  fileprivate var _grant: Calendar_V1_Grant? = nil
-}
-
-public nonisolated struct Calendar_V1_RevokeGrantRequest: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var grantID: String = String()
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
-public nonisolated struct Calendar_V1_RevokeGrantResponse: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
-public nonisolated struct Calendar_V1_ListGrantsRequest: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
-public nonisolated struct Calendar_V1_ListGrantsResponse: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var grants: [Calendar_V1_Grant] = []
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
-/// Activity is one row of the owner's history.
+/// Activity is one row of a pair calendar's history.
 public nonisolated struct Calendar_V1_Activity: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -1168,7 +995,7 @@ public nonisolated struct Calendar_V1_Activity: Sendable {
 
   public var id: String = String()
 
-  /// share | unshare | event_added | event_changed | event_deleted
+  /// event_added | event_changed | event_deleted
   public var kind: String = String()
 
   /// user | system
@@ -1199,6 +1026,9 @@ public nonisolated struct Calendar_V1_ListActivityRequest: Sendable {
   /// 0 = server default
   public var limit: Int32 = 0
 
+  /// the pair calendar
+  public var calendarID: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -1222,10 +1052,6 @@ public nonisolated struct Calendar_V1_ListActivityResponse: Sendable {
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 fileprivate nonisolated let _protobuf_package = "calendar.v1"
-
-nonisolated extension Calendar_V1_Role: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0ROLE_UNSPECIFIED\0\u{1}ROLE_OWNER\0\u{1}ROLE_EDIT\0\u{1}ROLE_VIEW\0")
-}
 
 nonisolated extension Calendar_V1_Freq: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0FREQ_UNSPECIFIED\0\u{1}FREQ_DAILY\0\u{1}FREQ_WEEKLY\0\u{1}FREQ_MONTHLY\0\u{1}FREQ_YEARLY\0")
@@ -1321,7 +1147,7 @@ nonisolated extension Calendar_V1_Contact: SwiftProtobuf.Message, SwiftProtobuf.
 
 nonisolated extension Calendar_V1_Calendar: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Calendar"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}owner_id\0\u{1}name\0\u{1}color\0\u{1}role\0\u{1}rev\0\u{3}grant_expires_at\0\u{1}visible\0\u{3}pref_color\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{2}\u{2}name\0\u{2}\u{3}rev\0\u{2}\u{2}visible\0\u{3}pref_color\0\u{3}other_id\0\u{1}frozen\0\u{b}owner_id\0\u{b}color\0\u{b}role\0\u{b}grant_expires_at\0\u{c}\u{2}\u{1}\u{c}\u{4}\u{1}\u{c}\u{5}\u{1}\u{c}\u{7}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1330,14 +1156,12 @@ nonisolated extension Calendar_V1_Calendar: SwiftProtobuf.Message, SwiftProtobuf
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.id) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.ownerID) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.name) }()
-      case 4: try { try decoder.decodeSingularStringField(value: &self.color) }()
-      case 5: try { try decoder.decodeSingularEnumField(value: &self.role) }()
       case 6: try { try decoder.decodeSingularInt64Field(value: &self.rev) }()
-      case 7: try { try decoder.decodeSingularInt64Field(value: &self.grantExpiresAt) }()
       case 8: try { try decoder.decodeSingularBoolField(value: &self.visible) }()
       case 9: try { try decoder.decodeSingularStringField(value: &self.prefColor) }()
+      case 10: try { try decoder.decodeSingularStringField(value: &self.otherID) }()
+      case 11: try { try decoder.decodeSingularBoolField(value: &self.frozen) }()
       default: break
       }
     }
@@ -1347,23 +1171,11 @@ nonisolated extension Calendar_V1_Calendar: SwiftProtobuf.Message, SwiftProtobuf
     if !self.id.isEmpty {
       try visitor.visitSingularStringField(value: self.id, fieldNumber: 1)
     }
-    if !self.ownerID.isEmpty {
-      try visitor.visitSingularStringField(value: self.ownerID, fieldNumber: 2)
-    }
     if !self.name.isEmpty {
       try visitor.visitSingularStringField(value: self.name, fieldNumber: 3)
     }
-    if !self.color.isEmpty {
-      try visitor.visitSingularStringField(value: self.color, fieldNumber: 4)
-    }
-    if self.role != .unspecified {
-      try visitor.visitSingularEnumField(value: self.role, fieldNumber: 5)
-    }
     if self.rev != 0 {
       try visitor.visitSingularInt64Field(value: self.rev, fieldNumber: 6)
-    }
-    if self.grantExpiresAt != 0 {
-      try visitor.visitSingularInt64Field(value: self.grantExpiresAt, fieldNumber: 7)
     }
     if self.visible != false {
       try visitor.visitSingularBoolField(value: self.visible, fieldNumber: 8)
@@ -1371,19 +1183,23 @@ nonisolated extension Calendar_V1_Calendar: SwiftProtobuf.Message, SwiftProtobuf
     if !self.prefColor.isEmpty {
       try visitor.visitSingularStringField(value: self.prefColor, fieldNumber: 9)
     }
+    if !self.otherID.isEmpty {
+      try visitor.visitSingularStringField(value: self.otherID, fieldNumber: 10)
+    }
+    if self.frozen != false {
+      try visitor.visitSingularBoolField(value: self.frozen, fieldNumber: 11)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Calendar_V1_Calendar, rhs: Calendar_V1_Calendar) -> Bool {
     if lhs.id != rhs.id {return false}
-    if lhs.ownerID != rhs.ownerID {return false}
     if lhs.name != rhs.name {return false}
-    if lhs.color != rhs.color {return false}
-    if lhs.role != rhs.role {return false}
     if lhs.rev != rhs.rev {return false}
-    if lhs.grantExpiresAt != rhs.grantExpiresAt {return false}
     if lhs.visible != rhs.visible {return false}
     if lhs.prefColor != rhs.prefColor {return false}
+    if lhs.otherID != rhs.otherID {return false}
+    if lhs.frozen != rhs.frozen {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -2498,9 +2314,9 @@ nonisolated extension Calendar_V1_ListContactsResponse: SwiftProtobuf.Message, S
   }
 }
 
-nonisolated extension Calendar_V1_UpdateCalendarRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".UpdateCalendarRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}name\0\u{1}color\0")
+nonisolated extension Calendar_V1_OpenPairRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".OpenPairRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}other_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2508,37 +2324,28 @@ nonisolated extension Calendar_V1_UpdateCalendarRequest: SwiftProtobuf.Message, 
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self._name) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self._color) }()
+      case 1: try { try decoder.decodeSingularStringField(value: &self.otherID) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
-    try { if let v = self._name {
-      try visitor.visitSingularStringField(value: v, fieldNumber: 1)
-    } }()
-    try { if let v = self._color {
-      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
-    } }()
+    if !self.otherID.isEmpty {
+      try visitor.visitSingularStringField(value: self.otherID, fieldNumber: 1)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: Calendar_V1_UpdateCalendarRequest, rhs: Calendar_V1_UpdateCalendarRequest) -> Bool {
-    if lhs._name != rhs._name {return false}
-    if lhs._color != rhs._color {return false}
+  public static func ==(lhs: Calendar_V1_OpenPairRequest, rhs: Calendar_V1_OpenPairRequest) -> Bool {
+    if lhs.otherID != rhs.otherID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
 }
 
-nonisolated extension Calendar_V1_UpdateCalendarResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".UpdateCalendarResponse"
+nonisolated extension Calendar_V1_OpenPairResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".OpenPairResponse"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}calendar\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -2564,7 +2371,7 @@ nonisolated extension Calendar_V1_UpdateCalendarResponse: SwiftProtobuf.Message,
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: Calendar_V1_UpdateCalendarResponse, rhs: Calendar_V1_UpdateCalendarResponse) -> Bool {
+  public static func ==(lhs: Calendar_V1_OpenPairResponse, rhs: Calendar_V1_OpenPairResponse) -> Bool {
     if lhs._calendar != rhs._calendar {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -2573,7 +2380,7 @@ nonisolated extension Calendar_V1_UpdateCalendarResponse: SwiftProtobuf.Message,
 
 nonisolated extension Calendar_V1_SaveLabelRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SaveLabelRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}name\0\u{1}color\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}name\0\u{1}color\0\u{3}calendar_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2584,6 +2391,7 @@ nonisolated extension Calendar_V1_SaveLabelRequest: SwiftProtobuf.Message, Swift
       case 1: try { try decoder.decodeSingularStringField(value: &self.id) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.name) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.color) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.calendarID) }()
       default: break
       }
     }
@@ -2599,6 +2407,9 @@ nonisolated extension Calendar_V1_SaveLabelRequest: SwiftProtobuf.Message, Swift
     if !self.color.isEmpty {
       try visitor.visitSingularStringField(value: self.color, fieldNumber: 3)
     }
+    if !self.calendarID.isEmpty {
+      try visitor.visitSingularStringField(value: self.calendarID, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -2606,6 +2417,7 @@ nonisolated extension Calendar_V1_SaveLabelRequest: SwiftProtobuf.Message, Swift
     if lhs.id != rhs.id {return false}
     if lhs.name != rhs.name {return false}
     if lhs.color != rhs.color {return false}
+    if lhs.calendarID != rhs.calendarID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -2694,238 +2506,6 @@ nonisolated extension Calendar_V1_DeleteLabelResponse: SwiftProtobuf.Message, Sw
   }
 }
 
-nonisolated extension Calendar_V1_Grant: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".Grant"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}grantee_id\0\u{1}role\0\u{3}created_at\0\u{3}expires_at\0\u{1}label\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.id) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.granteeID) }()
-      case 3: try { try decoder.decodeSingularEnumField(value: &self.role) }()
-      case 4: try { try decoder.decodeSingularInt64Field(value: &self.createdAt) }()
-      case 5: try { try decoder.decodeSingularInt64Field(value: &self.expiresAt) }()
-      case 6: try { try decoder.decodeSingularStringField(value: &self.label) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.id.isEmpty {
-      try visitor.visitSingularStringField(value: self.id, fieldNumber: 1)
-    }
-    if !self.granteeID.isEmpty {
-      try visitor.visitSingularStringField(value: self.granteeID, fieldNumber: 2)
-    }
-    if self.role != .unspecified {
-      try visitor.visitSingularEnumField(value: self.role, fieldNumber: 3)
-    }
-    if self.createdAt != 0 {
-      try visitor.visitSingularInt64Field(value: self.createdAt, fieldNumber: 4)
-    }
-    if self.expiresAt != 0 {
-      try visitor.visitSingularInt64Field(value: self.expiresAt, fieldNumber: 5)
-    }
-    if !self.label.isEmpty {
-      try visitor.visitSingularStringField(value: self.label, fieldNumber: 6)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Calendar_V1_Grant, rhs: Calendar_V1_Grant) -> Bool {
-    if lhs.id != rhs.id {return false}
-    if lhs.granteeID != rhs.granteeID {return false}
-    if lhs.role != rhs.role {return false}
-    if lhs.createdAt != rhs.createdAt {return false}
-    if lhs.expiresAt != rhs.expiresAt {return false}
-    if lhs.label != rhs.label {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Calendar_V1_CreateGrantRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".CreateGrantRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}grantee_id\0\u{1}role\0\u{3}expires_at\0\u{1}label\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.granteeID) }()
-      case 2: try { try decoder.decodeSingularEnumField(value: &self.role) }()
-      case 3: try { try decoder.decodeSingularInt64Field(value: &self.expiresAt) }()
-      case 4: try { try decoder.decodeSingularStringField(value: &self.label) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.granteeID.isEmpty {
-      try visitor.visitSingularStringField(value: self.granteeID, fieldNumber: 1)
-    }
-    if self.role != .unspecified {
-      try visitor.visitSingularEnumField(value: self.role, fieldNumber: 2)
-    }
-    if self.expiresAt != 0 {
-      try visitor.visitSingularInt64Field(value: self.expiresAt, fieldNumber: 3)
-    }
-    if !self.label.isEmpty {
-      try visitor.visitSingularStringField(value: self.label, fieldNumber: 4)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Calendar_V1_CreateGrantRequest, rhs: Calendar_V1_CreateGrantRequest) -> Bool {
-    if lhs.granteeID != rhs.granteeID {return false}
-    if lhs.role != rhs.role {return false}
-    if lhs.expiresAt != rhs.expiresAt {return false}
-    if lhs.label != rhs.label {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Calendar_V1_CreateGrantResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".CreateGrantResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}grant\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._grant) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
-    try { if let v = self._grant {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
-    } }()
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Calendar_V1_CreateGrantResponse, rhs: Calendar_V1_CreateGrantResponse) -> Bool {
-    if lhs._grant != rhs._grant {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Calendar_V1_RevokeGrantRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".RevokeGrantRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}grant_id\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.grantID) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.grantID.isEmpty {
-      try visitor.visitSingularStringField(value: self.grantID, fieldNumber: 1)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Calendar_V1_RevokeGrantRequest, rhs: Calendar_V1_RevokeGrantRequest) -> Bool {
-    if lhs.grantID != rhs.grantID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Calendar_V1_RevokeGrantResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".RevokeGrantResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    // Load everything into unknown fields
-    while try decoder.nextFieldNumber() != nil {}
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Calendar_V1_RevokeGrantResponse, rhs: Calendar_V1_RevokeGrantResponse) -> Bool {
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Calendar_V1_ListGrantsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".ListGrantsRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    // Load everything into unknown fields
-    while try decoder.nextFieldNumber() != nil {}
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Calendar_V1_ListGrantsRequest, rhs: Calendar_V1_ListGrantsRequest) -> Bool {
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Calendar_V1_ListGrantsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".ListGrantsResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}grants\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.grants) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.grants.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.grants, fieldNumber: 1)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Calendar_V1_ListGrantsResponse, rhs: Calendar_V1_ListGrantsResponse) -> Bool {
-    if lhs.grants != rhs.grants {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
 nonisolated extension Calendar_V1_Activity: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Activity"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}kind\0\u{3}actor_kind\0\u{3}actor_id\0\u{1}at\0\u{1}detail\0\u{3}event_id\0")
@@ -2988,7 +2568,7 @@ nonisolated extension Calendar_V1_Activity: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension Calendar_V1_ListActivityRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ListActivityRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}cursor\0\u{1}limit\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}cursor\0\u{1}limit\0\u{3}calendar_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2998,6 +2578,7 @@ nonisolated extension Calendar_V1_ListActivityRequest: SwiftProtobuf.Message, Sw
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.cursor) }()
       case 2: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.calendarID) }()
       default: break
       }
     }
@@ -3010,12 +2591,16 @@ nonisolated extension Calendar_V1_ListActivityRequest: SwiftProtobuf.Message, Sw
     if self.limit != 0 {
       try visitor.visitSingularInt32Field(value: self.limit, fieldNumber: 2)
     }
+    if !self.calendarID.isEmpty {
+      try visitor.visitSingularStringField(value: self.calendarID, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Calendar_V1_ListActivityRequest, rhs: Calendar_V1_ListActivityRequest) -> Bool {
     if lhs.cursor != rhs.cursor {return false}
     if lhs.limit != rhs.limit {return false}
+    if lhs.calendarID != rhs.calendarID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

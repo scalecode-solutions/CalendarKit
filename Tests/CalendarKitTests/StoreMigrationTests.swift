@@ -17,11 +17,10 @@ struct StoreMigrationTests {
         let enc = JSONEncoder()
 
         let calID = UUID(), eventID = UUID()
-        let cal = CalCalendar(id: calID, ownerID: UUID(), name: "", color: .teal, role: .owner, rev: 3,
-                              grantExpiresAt: nil, visible: true, prefColor: .none)
+        let cal = CalCalendar(id: calID, otherID: UUID(), rev: 3, prefColor: .teal)
         let event = CalEvent(id: eventID, calendarID: calID,
                              fields: CalEventFields(title: "kept", when: .allDay(start: CalDate(2026, 11, 20), end: CalDate(2026, 11, 21))),
-                             masterID: nil, originalStart: nil, cancelled: false, createdBy: cal.ownerID, updatedBy: cal.ownerID,
+                             masterID: nil, originalStart: nil, cancelled: false, createdBy: cal.otherID, updatedBy: cal.otherID,
                              createdAt: Date(), updatedAt: Date(), rev: 0, deleted: false)
         let lastSync = Date(timeIntervalSince1970: 1_800_000_000)
         // What 0.4.0 queued: a reminder write, its defaults, and a real write.

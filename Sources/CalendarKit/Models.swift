@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 // The kit's own types: what hosts and views use. The generated protobuf types
 // stay inside the transport.
@@ -68,12 +69,6 @@ public struct CalDate: Hashable, Comparable, Sendable, Codable, CustomStringConv
     public var description: String { String(format: "%04d-%02d-%02d", year, month, day) }
 }
 
-/// What the caller may do with a calendar.
-public enum CalRole: String, Sendable, Codable {
-    case owner, edit, view
-    public var canWrite: Bool { self != .view }
-}
-
 /// The color palette (`none` = no color set). Hosts map tokens to light and
 /// dark colors; `CalColor+UI` has the kit's defaults.
 public enum CalColor: String, CaseIterable, Sendable, Codable {
@@ -81,33 +76,73 @@ public enum CalColor: String, CaseIterable, Sendable, Codable {
     case red, orange, yellow, green, mint, teal, cyan, sky, blue, indigo, purple, pink, brown, gray
 }
 
-/// A calendar the caller can see: their own, or one shared with them.
+/// A pair calendar: one the caller keeps together with one other person.
+/// There's no owner: both of them read and change everything on it. Its id is
+/// computed from the two (`CalPairID`), so a pair exists on this device before
+/// the server has a row for it.
 public struct CalCalendar: Identifiable, Equatable, Sendable, Codable {
     public let id: UUID
-    public let ownerID: UUID
-    /// "" = the host shows the owner's name.
+    /// The other member.
+    public let otherID: UUID
+    /// "" = the host shows the other member's name.
     public var name: String
-    public var color: CalColor
-    public var role: CalRole
     /// The newest change on the server (the sync cursor's target).
     public var rev: Int64
-    /// For a shared calendar: when the share ends (nil = never).
-    public var grantExpiresAt: Date?
-    /// The caller's own display preference.
+    /// The two aren't friends any more: everything stays readable, nothing can
+    /// be changed. Back to false the moment they are again.
+    public var frozen: Bool
+    /// The caller's own display preference (false: hidden for them).
     public var visible: Bool
     public var prefColor: CalColor
+    /// Whether the server has listed it. A pair nobody has opened yet is shown
+    /// from the caller's contacts (false) until its first write opens it.
+    public internal(set) var listed: Bool = true
 
-    /// What the engine draws it in when neither this person nor the owner chose
-    /// a color: one apart from the person's own and the other calendars', from
-    /// the owner's id (`CalCalendar.assignAutoColors`). Kept in this device's
-    /// store so it doesn't move when friends come and go; never synced.
+    /// What the engine draws it in when the person chose no color: one apart
+    /// from their own accent and the other pairs', from the other member's id
+    /// (`CalCalendar.assignAutoColors`). Kept in this device's store so it
+    /// doesn't move when friends come and go; never synced.
     public internal(set) var autoColor: CalColor? = nil
 
-    public var isOwn: Bool { role == .owner }
-    /// The color to draw it in for this person: their override, else the
-    /// owner's, else the automatic one.
-    public var displayColor: CalColor {
-        prefColor != .none ? prefColor : color != .none ? color : autoColor ?? .none
+    public init(id: UUID, otherID: UUID, name: String = "", rev: Int64 = 0, frozen: Bool = false,
+                visible: Bool = true, prefColor: CalColor = .none) {
+        self.id = id
+        self.otherID = otherID
+        self.name = name
+        self.rev = rev
+        self.frozen = frozen
+        self.visible = visible
+        self.prefColor = prefColor
+    }
+
+    /// The color to draw it in for this person: their choice, else the
+    /// automatic one.
+    public var displayColor: CalColor { prefColor != .none ? prefColor : autoColor ?? .none }
+}
+
+/// A pair calendar's id: UUIDv5 (SHA-1) in the pair namespace over the two
+/// people's 16-byte ids, lower first in byte order. The server computes the
+/// same (it never takes one from a client), so both phones know a pair's id
+/// before it exists anywhere.
+public enum CalPairID {
+    /// Part of the wire contract with the server: never change it.
+    public static let namespace = UUID(uuidString: "1cb2b0c2-a02e-4ef6-8d47-1f8f5c22fbfc")!
+
+    public static func make(_ a: UUID, _ b: UUID) -> UUID {
+        let (x, y) = (bytes(a), bytes(b))
+        let (lo, hi) = x.lexicographicallyPrecedes(y) ? (x, y) : (y, x)
+        return v5(namespace: namespace, name: lo + hi)
+    }
+
+    static func bytes(_ u: UUID) -> [UInt8] { withUnsafeBytes(of: u.uuid) { Array($0) } }
+
+    /// RFC 4122 §4.3: SHA-1 of namespace bytes + name, version 5, variant 10.
+    static func v5(namespace: UUID, name: [UInt8]) -> UUID {
+        var h = Array(Insecure.SHA1.hash(data: bytes(namespace) + name)).prefix(16).map { $0 }
+        h[6] = (h[6] & 0x0F) | 0x50
+        h[8] = (h[8] & 0x3F) | 0x80
+        return UUID(uuid: (h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7],
+                           h[8], h[9], h[10], h[11], h[12], h[13], h[14], h[15]))
     }
 }
 
@@ -135,17 +170,16 @@ extension CalCalendar {
     ///   the first free color, in owner-id order.
     /// - Once every color is taken, colors repeat: a calendar keeps the one it
     ///   had, else takes its id's slot.
-    static func assignAutoColors(_ cals: [CalCalendar]) -> [CalCalendar] {
+    static func assignAutoColors(_ cals: [CalCalendar], own: CalColor = .indigo) -> [CalCalendar] {
         var out = cals
         var taken: Set<CalColor> = []
-        let ownChosen = out.first { $0.isOwn }?.displayColor ?? CalColor.none
-        let own = ownChosen == .none ? CalColor.indigo : ownChosen
+        let own = own == .none ? CalColor.indigo : own
         taken.insert(own)
         let near = neighbours(of: own)
-        func needsOne(_ c: CalCalendar) -> Bool { !c.isOwn && c.prefColor == .none && c.color == .none }
-        for c in out where !needsOne(c) && !c.isOwn { taken.insert(c.displayColor) }
+        func needsOne(_ c: CalCalendar) -> Bool { c.prefColor == .none }
+        for c in out where !needsOne(c) { taken.insert(c.displayColor) }
         let open = out.indices.filter { needsOne(out[$0]) }
-            .sorted { (out[$0].ownerID.uuidString, out[$0].id.uuidString) < (out[$1].ownerID.uuidString, out[$1].id.uuidString) }
+            .sorted { (out[$0].otherID.uuidString, out[$0].id.uuidString) < (out[$1].otherID.uuidString, out[$1].id.uuidString) }
         // Those that already have one keep it first, so a newcomer can't take it.
         // One beside the person's own is kept only while nothing better is free
         // (it was given out when everything else was taken).
@@ -164,7 +198,7 @@ extension CalCalendar {
         }
         let n = autoPalette.count
         for i in newcomers {
-            let start = stableIndex(out[i].ownerID, n)
+            let start = stableIndex(out[i].otherID, n)
             let walk = (0..<n).lazy.map { autoPalette[(start + $0) % n] }
             // Nothing free (more friends than colors): keep what it had, even
             // shared, so a full palette doesn't reshuffle on every pass.
@@ -313,27 +347,17 @@ public struct CalEvent: Identifiable, Equatable, Sendable, Codable {
     public var isException: Bool { masterID != nil }
 }
 
-/// A person the caller may share with.
+/// A person the caller has (or can open) a pair calendar with, or the caller.
 public struct CalContact: Identifiable, Equatable, Sendable {
     public let id: UUID
     public let name: String
     public let avatar: Data?
 }
 
-/// The owner sharing their calendar with one person.
-public struct CalGrant: Identifiable, Equatable, Sendable {
-    public let id: UUID
-    public let granteeID: UUID
-    public var role: CalRole
-    public var createdAt: Date
-    public var expiresAt: Date?
-    public var label: String
-}
-
-/// One row of the owner's history.
+/// One row of a pair calendar's history (either member's change).
 public struct CalActivity: Identifiable, Equatable, Sendable {
     public let id: UUID
-    /// share | unshare | event_added | event_changed | event_deleted
+    /// event_added | event_changed | event_deleted
     public let kind: String
     public let actorID: UUID?
     public let at: Date

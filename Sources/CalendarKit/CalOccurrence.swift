@@ -15,7 +15,8 @@ public struct CalOccurrence: Identifiable, Equatable, Sendable {
     public let when: CalWhen
     public let calendar: CalCalendar
     public let label: CalLabel?
-    /// event color → label color → the calendar's display color.
+    /// event color → label color → the calendar's display color (or, inside
+    /// one pair, who added it: the person's own color for theirs).
     public let color: CalColor
     /// Who made it: the series' creator for an occurrence of a series (even a
     /// changed one), else the event's.
@@ -37,8 +38,12 @@ public struct CalOccurrence: Identifiable, Equatable, Sendable {
 enum OccurrenceBuilder {
     /// Everything on these calendars that touches [from, through] (days in `zone`,
     /// the viewer's).
+    /// `byAuthor`: inside one pair, an uncolored event takes its author's
+    /// color (the person's own for theirs, the pair's for the other's) instead
+    /// of the pair's.
     static func build(events: [CalEvent], exceptions: [CalEvent], calendars: [UUID: CalCalendar],
-                      labels: [UUID: CalLabel], from: CalDate, through: CalDate, zone: TimeZone) -> [CalOccurrence] {
+                      labels: [UUID: CalLabel], from: CalDate, through: CalDate, zone: TimeZone,
+                      byAuthor: (me: UUID, mine: CalColor)? = nil) -> [CalOccurrence] {
         let rangeStart = start(of: from, in: zone), rangeEnd = start(of: through.adding(days: 1), in: zone)
         let byMaster = Dictionary(grouping: exceptions.filter { !$0.deleted }, by: { $0.masterID! })
         var out: [CalOccurrence] = []
@@ -52,8 +57,10 @@ enum OccurrenceBuilder {
         func occurrence(_ shown: CalEvent, series: CalEvent?, original: CalOriginalStart?, when: CalWhen) -> CalOccurrence? {
             guard let cal = calendars[shown.calendarID] else { return nil }
             let label = shown.fields.labelID.flatMap { labels[$0] }
+            let author = (series ?? shown).createdBy
+            let fallback = byAuthor.map { author == $0.me ? $0.mine : cal.displayColor } ?? cal.displayColor
             let color = shown.fields.color != .none ? shown.fields.color
-                : (label?.color ?? .none) != .none ? label!.color : cal.displayColor
+                : (label?.color ?? .none) != .none ? label!.color : fallback
             let base = (series ?? shown).id.uuidString
             let id: String
             switch original {
@@ -62,7 +69,7 @@ enum OccurrenceBuilder {
             case nil: id = base
             }
             return CalOccurrence(id: id, event: shown, seriesID: series?.id, originalStart: original, when: when,
-                                 calendar: cal, label: label, color: color, author: (series ?? shown).createdBy)
+                                 calendar: cal, label: label, color: color, author: author)
         }
 
         for e in events where !e.deleted && e.masterID == nil {

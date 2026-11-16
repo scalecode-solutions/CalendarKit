@@ -10,6 +10,8 @@ struct DayView: View {
     let appearance: CalendarAppearance
     let zone: TimeZone
     let showOwners: Bool
+    /// The pair in focus, if one is: new events go there, rows say who added them.
+    let inPair: UUID?
     /// The day's occurrences, from the calendar screen, so the day shows
     /// exactly what the grid does.
     let occurrences: (CalDate) -> [CalOccurrence]
@@ -19,16 +21,23 @@ struct DayView: View {
     @State private var detail: CalOccurrence?
 
     init(engine: CalendarEngine, appearance: CalendarAppearance, zone: TimeZone, day: CalDate,
-         showOwners: Bool, occurrences: @escaping (CalDate) -> [CalOccurrence]) {
+         showOwners: Bool, inPair: UUID? = nil, occurrences: @escaping (CalDate) -> [CalOccurrence]) {
         self.engine = engine
         self.appearance = appearance
         self.zone = zone
         self.showOwners = showOwners
+        self.inPair = inPair
         self.occurrences = occurrences
         _day = State(initialValue: day)
     }
 
     private var today: CalDate { CalDate(Date(), in: zone) }
+
+    /// Something can be added here: a pair that isn't frozen.
+    private var canAdd: Bool {
+        guard let inPair else { return !engine.writableCalendars.isEmpty }
+        return engine.writableCalendars.contains { $0.id == inPair }
+    }
 
     var body: some View {
         let occ = occurrences(day)
@@ -51,9 +60,9 @@ struct DayView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { editor = .new(day) } label: { Image(systemName: "plus") }
+                Button { editor = .new(day, in: inPair) } label: { Image(systemName: "plus") }
                     .accessibilityLabel(appearance.newEvent)
-                    .disabled(engine.writableCalendars.isEmpty)
+                    .disabled(!canAdd)
             }
         }
         .calendarAccent(engine.accentColor)
@@ -102,8 +111,8 @@ struct DayView: View {
             HStack {
                 Text(appearance.emptyDay).foregroundStyle(.secondary)
                 Spacer()
-                Button("Add") { editor = .new(day) }
-                    .disabled(engine.writableCalendars.isEmpty)
+                Button("Add") { editor = .new(day, in: inPair) }
+                    .disabled(!canAdd)
                     .accessibilityLabel(appearance.newEvent)
             }
             .padding(16)
@@ -113,7 +122,8 @@ struct DayView: View {
             // the same id on each of its days.
             ForEach(occ.map { AgendaItem(day: day, occurrence: $0) }) { item in
                 Button { detail = item.occurrence } label: {
-                    AgendaRow(occurrence: item.occurrence, day: day, engine: engine, showOwner: showOwners)
+                    AgendaRow(occurrence: item.occurrence, day: day, engine: engine, showOwner: showOwners,
+                              inPair: inPair != nil)
                 }
                 .buttonStyle(.plain)
             }

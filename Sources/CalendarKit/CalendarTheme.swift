@@ -66,9 +66,9 @@ extension View {
 }
 
 extension CalendarEngine {
-    /// The colors the backdrop glows with: the shown calendars', own first.
+    /// The colors the backdrop glows with: the person's own, then the shown pairs'.
     public var backdropColors: [CalColor] {
-        var out: [CalColor] = []
+        var out: [CalColor] = [accentColor]
         for c in calendars where c.visible {
             let col = c.displayColor == .none ? CalColor.indigo : c.displayColor
             if !out.contains(col) { out.append(col) }
@@ -76,9 +76,6 @@ extension CalendarEngine {
         return Array(out.prefix(3))
     }
 
-    /// The kit's accent: the person's own calendar color.
-    public var accentColor: CalColor {
-        guard let own = ownCalendar else { return .indigo }
-        return own.displayColor == .none ? .indigo : own.displayColor
-    }
+    /// The kit's accent: the person's own color (indigo until they choose).
+    public var accentColor: CalColor { myColor == .none ? .indigo : myColor }
 }

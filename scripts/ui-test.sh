@@ -8,13 +8,13 @@ SERVER=../mvCalendar
 SIM=${SIM:-CalendarLab27}
 DD=${DD:-/tmp/calab-dd}   # build folder: give each resident their own
 ONLY=${ONLY:-}            # one test method, e.g. ONLY=testEditorAndDetailTour
-curl -fsS http://localhost:6100/health >/dev/null || { echo "mvCalendar isn't up"; exit 2; }
-psql_cal() { docker exec cal-db psql -U cal -d cal -Atc "$1"; }
-[ "$(psql_cal "SELECT count(*) FROM calendars WHERE owner_id = '$USER_ID'")" = "0" ] || { echo "refusing: $USER_ID already has a calendar locally"; exit 2; }
+BASE=${BASE:-http://localhost:6100}   # a throwaway server: BASE=http://localhost:6101 CAL_DB=<its container>
+curl -fsS "$BASE/health" >/dev/null || { echo "mvCalendar isn't up"; exit 2; }
+psql_cal() { docker exec "${CAL_DB:-cal-db}" psql -U cal -d cal -Atc "$1"; }
+[ "$(psql_cal "SELECT count(*) FROM calendars WHERE member_lo = '$USER_ID' OR member_hi = '$USER_ID'")" = "0" ] || { echo "refusing: $USER_ID already has a calendar locally"; exit 2; }
 wipe() {
-  psql_cal "DELETE FROM grants WHERE grantee_id = '$USER_ID';
-            DELETE FROM calendars WHERE owner_id = '$USER_ID'; DELETE FROM activity WHERE owner_id = '$USER_ID';
-            DELETE FROM calendar_prefs WHERE user_id = '$USER_ID';" >/dev/null
+  # Every pair the account is in (events, labels, prefs and history go with it).
+  psql_cal "DELETE FROM calendars WHERE member_lo = '$USER_ID' OR member_hi = '$USER_ID';" >/dev/null
 }
 trap wipe EXIT
 trap "exit 130" INT TERM

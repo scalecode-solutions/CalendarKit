@@ -33,15 +33,32 @@ struct LiveTransportTests {
     // Mon 2026-11-16 09:00 Chicago.
     let monday9 = Date(timeIntervalSince1970: 1_794_841_200)
 
-    func own(_ t: ConnectCalendarTransport) async throws -> CalCalendar {
-        let page = try await t.sync(cursors: [:])
-        return try #require(page.calendars.first { $0.isOwn })
+    /// The owner's and partner's pair calendar (the two test accounts are
+    /// friends locally), opened from the side of `t`.
+    func pair(_ t: ConnectCalendarTransport, with other: UUID) async throws -> CalCalendar {
+        try await t.openPair(otherID: other)
+    }
+    func own(_ t: ConnectCalendarTransport) async throws -> CalCalendar { try await pair(t, with: live.partner) }
+
+    @Test func bothSidesOpenTheSamePairAtTheComputedID() async throws {
+        let a = try await pair(live.ownerT, with: live.partner)
+        let b = try await pair(live.partnerT, with: live.owner)
+        #expect(a.id == b.id)
+        #expect(a.id == CalPairID.make(live.owner, live.partner))
+        #expect(a.otherID == live.partner && b.otherID == live.owner)
+        #expect(!a.frozen && a.listed)
+        // Opening it again changes nothing (idempotent).
+        #expect(try await pair(live.ownerT, with: live.partner).id == a.id)
+        // Someone who isn't a friend: notFound, the same as nobody.
+        await #expect(throws: CalTransportError.notFound) {
+            _ = try await live.ownerT.openPair(otherID: UUID())
+        }
     }
 
     @Test func roundTripsEveryShapeOfEvent() async throws {
         let t = live.ownerT
         let cal = try await own(t)
-        let label = try await t.saveLabel(id: UUID(), name: "Doctor", color: .teal)
+        let label = try await t.saveLabel(id: UUID(), calendarID: cal.id, name: "Doctor", color: .teal)
         let timed = CalEventFields(title: "PT 🦵", notes: "bring the band\nline 2", location: "Clinic, Suite 4",
                                    when: .timed(start: monday9, end: monday9.addingTimeInterval(3600), timeZone: chicago),
                                    labelID: label.id, color: .orange,
@@ -90,25 +107,16 @@ struct LiveTransportTests {
         let cal = try await own(t)
         let e = try await t.createEvent(id: UUID(), calendarID: cal.id,
                                         fields: CalEventFields(title: "Dentist", when: .allDay(start: CalDate(2026, 12, 1), end: CalDate(2026, 12, 2))))
-        // A stranger to the calendar: notFound.
+        // Something that isn't there (or isn't the caller's to know of): notFound.
         await #expect(throws: CalTransportError.notFound) {
-            _ = try await p.updateEvent(id: e.id, baseRev: e.rev, fields: e.fields)
+            _ = try await p.updateEvent(id: UUID(), baseRev: 1, fields: e.fields)
         }
-        // Shared as view: forbidden.
-        let g = try await t.createGrant(granteeID: live.partner, role: .view, expiresAt: nil, label: "")
-        #expect(g.role == .view)
-        do {
-            _ = try await p.createEvent(id: UUID(), calendarID: cal.id, fields: e.fields)
-            Issue.record("viewer could write")
-        } catch let err as CalTransportError {
-            guard case .forbidden = err else { Issue.record("want forbidden, got \(err)"); return }
-        }
-        // Edit share; the partner edits; the owner's stale write is a conflict
+        // The other member edits; the owner's stale write is a conflict
         // carrying the partner's version.
-        _ = try await t.createGrant(granteeID: live.partner, role: .edit, expiresAt: nil, label: "")
         var moved = e.fields
         moved.title = "Dentist 3pm"
         let theirs = try await p.updateEvent(id: e.id, baseRev: e.rev, fields: moved)
+        #expect(theirs.updatedBy == live.partner && theirs.createdBy == live.owner)
         do {
             _ = try await t.updateEvent(id: e.id, baseRev: e.rev, fields: e.fields)
             Issue.record("stale write went through")
@@ -124,14 +132,9 @@ struct LiveTransportTests {
         } catch CalTransportError.invalid(let msg) {
             #expect(msg == "bad time zone")
         }
-        // The partner's view of it, then revoke: the calendar is gone.
-        let pc = try await own(p)
-        let seen = try await p.sync(cursors: [pc.id: 0])
-        let shared = try #require(seen.calendars.first { $0.ownerID == live.owner })
-        #expect(shared.role == .edit && shared.visible)
-        try await t.revokeGrant(id: g.id)
-        let gone = try await p.sync(cursors: [shared.id: 1])
-        #expect(gone.gone == [shared.id])
+        // A cursor for a calendar the caller isn't in comes back gone.
+        let gone = try await p.sync(cursors: [UUID(): 1])
+        #expect(gone.gone.count == 1)
 
         // No token at all is notAuthenticated, without a request.
         let none = ConnectCalendarTransport(baseURL: live.base, tokenProvider: { nil })
@@ -155,11 +158,14 @@ struct LiveTransportTests {
     @Test func privateSettingsRoundTrip() async throws {
         let t = live.ownerT
         let cal = try await own(t)
-        try await t.setCalendarPref(calendarID: cal.id, visible: true, color: .pink)
+        try await t.setCalendarPref(calendarID: cal.id, visible: false, color: .pink)
         let page = try await t.sync(cursors: [:])
-        #expect(page.calendars.first { $0.isOwn }?.displayColor == .pink)
-        let renamed = try await t.updateCalendar(name: "Owner", color: .blue)
-        #expect(renamed.name == "Owner" && renamed.color == .blue && renamed.displayColor == .pink)
+        let mine = try #require(page.calendars.first { $0.id == cal.id })
+        #expect(mine.displayColor == .pink && !mine.visible)
+        // Private: the other member doesn't see it.
+        let theirs = try #require(try await live.partnerT.sync(cursors: [:]).calendars.first { $0.id == cal.id })
+        #expect(theirs.visible && theirs.prefColor == .none)
+        try await t.setCalendarPref(calendarID: cal.id, visible: true, color: .none)
         let contacts = try await t.listContacts()
         #expect(contacts.contains { $0.id == live.partner })
     }
@@ -202,31 +208,33 @@ struct LiveTransportTests {
         let owner = engine(live.owner, live.ownerToken), partner = engine(live.partner, live.partnerToken)
         await owner.refresh()
         await partner.refresh()
-        let own = try #require(owner.ownCalendar)
+        // Both see the pair with the other, at the same id, before or after
+        // the server has it.
+        let mine = try #require(owner.pair(with: live.partner))
+        let yours = try #require(partner.pair(with: live.owner))
+        #expect(mine.id == yours.id)
         let nov = (CalDate(2026, 11, 1), CalDate(2026, 11, 30))
 
-        // The owner adds a weekly series, then shares as edit.
-        let series = owner.addEvent(to: own.id, CalEventFields(title: "PT",
+        // One adds a weekly series.
+        let series = owner.addEvent(to: mine.id, CalEventFields(title: "PT",
             when: .allDay(start: CalDate(2026, 11, 2), end: CalDate(2026, 11, 3)), recurrence: CalRecurrence(.weekly, count: 4)))
         await owner.refresh()
         #expect(owner.pendingCount == 0 && owner.event(series.id)?.rev ?? 0 > 0)
-        _ = try await owner.share(with: live.partner, role: .edit)
+        #expect(owner.notices.isEmpty)
 
-        // The partner sees it, edits one occurrence, adds an event.
+        // The other sees it, edits one occurrence, adds an event.
         await partner.refresh()
-        let theirs = try #require(partner.calendars.first { $0.ownerID == live.owner })
-        #expect(theirs.role == .edit)
         let occ = partner.occurrences(from: nov.0, through: nov.1).filter { $0.seriesID == series.id }
         #expect(occ.count == 4)
         var moved = occ[1].event.fields
         moved.title = "PT (moved)"
         moved.when = .allDay(start: CalDate(2026, 11, 10), end: CalDate(2026, 11, 11))
         partner.updateOccurrence(occ[1], moved)
-        partner.addEvent(to: theirs.id, CalEventFields(title: "Dentist", when: .allDay(start: CalDate(2026, 11, 12), end: CalDate(2026, 11, 13))))
+        partner.addEvent(to: yours.id, CalEventFields(title: "Dentist", when: .allDay(start: CalDate(2026, 11, 12), end: CalDate(2026, 11, 13))))
         await partner.refresh()
         #expect(partner.pendingCount == 0 && partner.notices.isEmpty)
 
-        // The owner sees both.
+        // The first sees both.
         await owner.refresh()
         // (Other tests in this suite leave their own events on the calendar.)
         let titles = owner.occurrences(from: nov.0, through: nov.1).map(\.title).filter { $0.hasPrefix("PT") || $0 == "Dentist" }
@@ -250,11 +258,13 @@ struct LiveTransportTests {
         #expect(ownerTitle == winner)
         #expect(owner.pendingCount == 0 && partner.pendingCount == 0)
 
-        // Revoke: the partner's copy of the calendar disappears.
-        let grants = try await owner.grants()
-        for g in grants { try await owner.revoke(g) }
+        // One hides it: gone from their screen, still there for the other.
+        partner.setHidden(try #require(partner.calendar(yours.id)), true)
         await partner.refresh()
-        #expect(partner.calendar(theirs.id) == nil)
-        #expect(partner.occurrences(from: nov.0, through: nov.1, includeHidden: true).isEmpty)
+        await owner.refresh()
+        #expect(partner.occurrences(from: nov.0, through: nov.1).isEmpty)
+        #expect(!owner.occurrences(from: nov.0, through: nov.1).isEmpty)
+        partner.setHidden(try #require(partner.calendar(yours.id)), false)
+        await partner.refresh()
     }
 }

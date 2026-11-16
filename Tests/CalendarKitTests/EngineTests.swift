@@ -10,6 +10,9 @@ final class FakeServer: CalendarTransport, Sendable {
     struct State {
         var me: UUID
         var calendars: [CalCalendar] = []
+        /// The caller's friends (ListContacts, and who OpenPair accepts).
+        var friends: [CalContact] = []
+        var opened: [UUID] = []
         var events: [UUID: CalEvent] = [:]
         var labels: [UUID: (CalLabel, deleted: Bool)] = [:]
         var offline = false
@@ -43,13 +46,30 @@ final class FakeServer: CalendarTransport, Sendable {
     func set(_ f: (inout State) -> Void) { state.withLock { f(&$0) } }
     func get<T>(_ f: (State) -> T) -> T { state.withLock { f($0) } }
 
-    /// Give `me` their own calendar (and optionally one shared with them).
+    /// A pair calendar on the server with `other` (a new friend when nil),
+    /// frozen when they aren't friends any more. Its id is the computed one.
     @discardableResult
-    func addCalendar(owner: UUID, role: CalRole, name: String = "") -> UUID {
-        let c = CalCalendar(id: UUID(), ownerID: owner, name: name, color: .blue, role: role, rev: 0,
-                            grantExpiresAt: nil, visible: true, prefColor: .none)
-        set { $0.calendars.append(c) }
+    func addPair(with other: UUID = UUID(), name: String = "", frozen: Bool = false, friend: Bool = true) -> UUID {
+        let me = get(\.me)
+        let c = CalCalendar(id: CalPairID.make(me, other), otherID: other, name: name, frozen: frozen)
+        set {
+            $0.calendars.append(c)
+            if friend && !frozen { $0.friends.append(CalContact(id: other, name: name.isEmpty ? "Friend" : name, avatar: nil)) }
+        }
         return c.id
+    }
+
+    /// The old per-person shapes, as pairs: "own" and "edit" are pairs the
+    /// caller can write to, "view" a frozen one (readable, never writable).
+    @discardableResult
+    func addCalendar(owner: UUID, role: TestRole, name: String = "") -> UUID {
+        addPair(with: owner == get(\.me) ? UUID() : owner, name: name, frozen: role == .view)
+    }
+
+    /// A friend with no pair on the server yet.
+    func addFriend(_ id: UUID = UUID(), name: String = "Friend") -> UUID {
+        set { $0.friends.append(CalContact(id: id, name: name, avatar: nil)) }
+        return id
     }
 
     private func bump(_ s: inout State, _ cal: UUID) -> Int64 {
@@ -67,7 +87,7 @@ final class FakeServer: CalendarTransport, Sendable {
 
     private func writable(_ s: State, _ cal: UUID) throws {
         guard let c = s.calendars.first(where: { $0.id == cal }) else { throw CalTransportError.notFound }
-        guard c.role.canWrite else { throw CalTransportError.forbidden("view only") }
+        guard !c.frozen else { throw CalTransportError.forbidden("frozen") }
     }
 
     /// Someone else edits an event on the server.
@@ -271,22 +291,27 @@ final class FakeServer: CalendarTransport, Sendable {
         }
     }
 
-    func listContacts() async throws -> [CalContact] { [] }
+    func listContacts() async throws -> [CalContact] {
+        state.withLock { s in [CalContact(id: s.me, name: "Me", avatar: nil)] + s.friends }
+    }
 
-    func updateCalendar(name: String?, color: CalColor?) async throws -> CalCalendar {
+    func openPair(otherID: UUID) async throws -> CalCalendar {
         try state.withLock { s in
-            try gate(&s, "rename")
-            let i = s.calendars.firstIndex { $0.role == .owner }!
-            if let name { s.calendars[i].name = name }
-            if let color { s.calendars[i].color = color }
-            return s.calendars[i]
+            try gate(&s, "openPair")
+            s.opened.append(otherID)
+            let id = CalPairID.make(s.me, otherID)
+            if let c = s.calendars.first(where: { $0.id == id }) { return c }
+            guard s.friends.contains(where: { $0.id == otherID }) else { throw CalTransportError.notFound }
+            let c = CalCalendar(id: id, otherID: otherID)
+            s.calendars.append(c)
+            return c
         }
     }
 
-    func saveLabel(id: UUID, name: String, color: CalColor) async throws -> CalLabel {
+    func saveLabel(id: UUID, calendarID cal: UUID, name: String, color: CalColor) async throws -> CalLabel {
         try state.withLock { s in
             try gate(&s, "label")
-            let cal = s.calendars.first { $0.role == .owner }!.id
+            try writable(s, cal)
             let l = CalLabel(id: id, calendarID: cal, name: name, color: color, rev: bump(&s, cal))
             s.labels[id] = (l, false)
             return l
@@ -307,13 +332,11 @@ final class FakeServer: CalendarTransport, Sendable {
         }
     }
 
-    func createGrant(granteeID: UUID, role: CalRole, expiresAt: Date?, label: String) async throws -> CalGrant {
-        CalGrant(id: UUID(), granteeID: granteeID, role: role, createdAt: Date(), expiresAt: expiresAt, label: label)
-    }
-    func revokeGrant(id: UUID) async throws {}
-    func listGrants() async throws -> [CalGrant] { [] }
-    func listActivity(cursor: String?, limit: Int) async throws -> (rows: [CalActivity], next: String?) { ([], nil) }
+    func listActivity(calendarID: UUID, cursor: String?, limit: Int) async throws -> (rows: [CalActivity], next: String?) { ([], nil) }
 }
+
+/// Tests' shorthand for the pair a calendar was in the per-person model.
+enum TestRole { case owner, edit, view }
 
 // MARK: - engine tests
 
@@ -342,7 +365,7 @@ struct EngineTests {
         _ = server.externalCreate(own, allDay("Work", 2026, 11, 20))
         await engine.refresh()
         #expect(engine.loadState == .loaded)
-        #expect(engine.ownCalendar?.id == own)
+        #expect(engine.calendars.map(\.id) == [own])
         #expect(engine.occurrences(from: nov.0, through: nov.1).map(\.title) == ["Work"])
     }
 
@@ -424,7 +447,7 @@ struct EngineTests {
         engine.addEvent(to: shared, allDay("sneaky", 2026, 11, 5))
         #expect(engine.occurrences(from: nov.0, through: nov.1).count == 1)
         await engine.refresh()
-        #expect(engine.notices.first?.message.contains("view this calendar but not change it") == true)
+        #expect(engine.notices.first?.message.contains("aren't friends any more") == true)
         #expect(engine.occurrences(from: nov.0, through: nov.1).isEmpty)
         #expect(engine.pendingCount == 0)
         #expect(!engine.writableCalendars.contains { $0.id == shared })
@@ -454,7 +477,7 @@ struct EngineTests {
         let (engine, server, own) = makeEngine()
         let other = server.addCalendar(owner: UUID(), role: .edit, name: "Partner")
         await engine.refresh()
-        let label = engine.saveLabel(name: "Work", color: .orange)!
+        let label = engine.saveLabel(in: engine.calendar(own)!, name: "Work", color: .orange)!
         var f = allDay("Shift", 2026, 11, 2, repeating: CalRecurrence(.weekly, count: 4))
         f.labelID = label.id
         let series = engine.addEvent(to: own, f)
@@ -464,7 +487,7 @@ struct EngineTests {
         #expect(occ.filter { $0.title == "Shift" }.map(\.when.firstDay) ==
                 [CalDate(2026, 11, 2), CalDate(2026, 11, 9), CalDate(2026, 11, 16), CalDate(2026, 11, 23)])
         #expect(occ.first { $0.title == "Shift" }?.color == .orange) // label color
-        #expect(occ.first { $0.title == "Their thing" }?.color == .blue) // calendar color
+        #expect(occ.first { $0.title == "Their thing" }?.color == engine.calendar(other)!.displayColor) // the pair's color
         // Cancel the 2nd, move the 3rd.
         let second = occ.filter { $0.seriesID == series.id }[1]
         let third = occ.filter { $0.seriesID == series.id }[2]
@@ -891,7 +914,7 @@ struct LabelDeletedElsewhereTests {
     @Test func eventsLoseTheLabelOnTheNextSync() async throws {
         let (engine, server, own) = makeEngine()
         await engine.refresh()
-        let label = engine.saveLabel(name: "Work", color: .orange)!
+        let label = engine.saveLabel(in: engine.calendar(own)!, name: "Work", color: .orange)!
         var f = allDay("Shift", 2026, 11, 5)
         f.labelID = label.id
         let e = engine.addEvent(to: own, f)
@@ -901,7 +924,8 @@ struct LabelDeletedElsewhereTests {
         await engine.refresh()
         #expect(engine.event(e.id)?.fields.labelID == nil)
         #expect(engine.labels.isEmpty)
-        #expect(engine.occurrences(from: nov.0, through: nov.1).first?.color != .orange)
+        // Back to the pair's own color (which may happen to be orange too).
+        #expect(engine.occurrences(from: nov.0, through: nov.1).first?.color == engine.calendar(own)!.displayColor)
     }
 }
 

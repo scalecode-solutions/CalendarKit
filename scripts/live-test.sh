@@ -12,21 +12,20 @@ cd "$(dirname "$0")/.."
 OWNER=${1:?usage: scripts/live-test.sh <owner-uuid> <partner-uuid> (test accounts)}
 PARTNER=${2:?usage: scripts/live-test.sh <owner-uuid> <partner-uuid> (test accounts)}
 SERVER=../mvCalendar
-BASE=http://localhost:6100
+BASE=${BASE:-http://localhost:6100}   # a throwaway server: BASE=http://localhost:6101 CAL_DB=<its container>
 SIM=${SIM:-CalendarLab27}
 
 curl -fsS "$BASE/health" >/dev/null || { echo "mvCalendar isn't up at $BASE (cd $SERVER && docker compose up -d)"; exit 2; }
-psql_cal() { docker exec cal-db psql -U cal -d cal -Atc "$1"; }
-existing=$(psql_cal "SELECT count(*) FROM calendars WHERE owner_id IN ('$OWNER', '$PARTNER')")
+psql_cal() { docker exec "${CAL_DB:-cal-db}" psql -U cal -d cal -Atc "$1"; }
+existing=$(psql_cal "SELECT count(*) FROM calendars WHERE member_lo IN ('$OWNER', '$PARTNER') OR member_hi IN ('$OWNER', '$PARTNER')")
 [ "$existing" = "0" ] || { echo "refusing: an account already has a calendar locally"; exit 2; }
 
 KEY=$(sed -n 's/^TOKEN_KEY=//p' "$SERVER/.env")
 mint() { (cd "$SERVER" && go run ./cmd/minttoken "$KEY" "$1"); }
 
 wipe() {
-  psql_cal "DELETE FROM calendars WHERE owner_id IN ('$OWNER', '$PARTNER');
-            DELETE FROM activity WHERE owner_id IN ('$OWNER', '$PARTNER');
-            DELETE FROM calendar_prefs WHERE user_id IN ('$OWNER', '$PARTNER');" >/dev/null
+  # Every pair either is in (their events, labels, prefs and history go with it).
+  psql_cal "DELETE FROM calendars WHERE member_lo IN ('$OWNER', '$PARTNER') OR member_hi IN ('$OWNER', '$PARTNER');" >/dev/null
 }
 trap wipe EXIT
 trap "exit 130" INT TERM
