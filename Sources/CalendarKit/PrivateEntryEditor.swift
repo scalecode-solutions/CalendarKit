@@ -12,6 +12,8 @@ enum PrivateChoices {
     static let locations = ["bedroom", "living_room", "shower", "car", "outdoors", "hotel", "other"]
     static let positions = ["missionary", "on_top", "from_behind", "spooning", "standing", "sitting", "side_by_side", "other"]
     static let initiated = ["", "me", "partner", "mutual"]
+    /// Finished inside, per partner ("" = not set, never sent).
+    static let finished = ["yes", "no", "unsure"]
 
     static func title(_ key: String) -> String {
         switch key {
@@ -231,7 +233,7 @@ struct PrivateEntryEditor: View {
                 Picker(content.partnerIDs.count == 1 ? "Finished inside" : "Finished inside: \(partners.first { $0.id == id }?.name ?? "Partner")",
                        selection: Binding(get: { content.finishedInside[id] ?? "" },
                                           set: { content.finishedInside[id] = $0.isEmpty ? nil : $0 })) {
-                    ForEach(["", "yes", "no", "unsure"], id: \.self) { Text(PrivateChoices.title($0)).tag($0) }
+                    ForEach([""] + PrivateChoices.finished, id: \.self) { Text(PrivateChoices.title($0)).tag($0) }
                 }
             }
         }

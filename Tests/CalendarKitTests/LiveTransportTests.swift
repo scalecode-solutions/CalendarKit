@@ -183,6 +183,48 @@ struct LiveTransportTests {
         _ = try await p.setConsent(calendarID: cal.id, kind: .intimate, on: false)
     }
 
+    /// The rest of what the kit can send as a word or a token, the same way:
+    /// finished inside per partner, a partner's heart color (every CalColor),
+    /// and a cycle day's flow (every CalFlow). The color loop runs as the other
+    /// member (either may edit the partner list), to spread the writes under
+    /// the per-person limit.
+    @Test func everyFinishedColorAndFlowSaves() async throws {
+        let t = live.ownerT, p = live.partnerT
+        let cal = try await own(t)
+        for kind in [CalConsentKind.intimate, .cycle] {
+            _ = try await t.setConsent(calendarID: cal.id, kind: kind, on: true)
+            _ = try await p.setConsent(calendarID: cal.id, kind: kind, on: true)
+        }
+        var partner = try await p.savePartner(CalPartner(calendarID: cal.id, name: "Sam"))
+        for color in CalColor.allCases {
+            partner.color = color
+            partner = try await p.savePartner(partner)
+            #expect(partner.color == color)
+        }
+
+        var c = CalPrivateContent(at: monday9, timeZone: chicago)
+        c.partnerIDs = [partner.id]
+        var entry = try await t.savePrivateEntry(CalPrivateEntry(calendarID: cal.id, content: c, createdBy: live.owner), baseRev: 0)
+        for value in PrivateChoices.finished {
+            entry.content.finishedInside = [partner.id: value]
+            entry = try await t.savePrivateEntry(entry, baseRev: entry.rev)
+            #expect(entry.content.finishedInside[partner.id] == value)
+        }
+        _ = try await t.deletePrivateEntry(id: entry.id, baseRev: entry.rev)
+
+        var day = CalCycleDay(calendarID: cal.id, personID: live.owner, date: CalDate(2026, 11, 2), flow: .spotting)
+        for flow in CalFlow.allCases {
+            day.flow = flow
+            day = try await t.saveCycleDay(day)
+            #expect(day.flow == flow)
+        }
+        _ = try await t.deleteCycleDay(id: day.id)
+        for kind in [CalConsentKind.intimate, .cycle] {
+            _ = try await t.setConsent(calendarID: cal.id, kind: kind, on: false)
+            _ = try await p.setConsent(calendarID: cal.id, kind: kind, on: false)
+        }
+    }
+
     @Test func privateSettingsRoundTrip() async throws {
         let t = live.ownerT
         let cal = try await own(t)
