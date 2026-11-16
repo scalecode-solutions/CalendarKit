@@ -117,6 +117,18 @@ public protocol Calendar_V1_CalendarServiceClientInterface: Sendable {
     /// (archive instead of delete: entries keep pointing at it).
     @available(iOS 13, *)
     func `saveIntimatePartner`(request: Calendar_V1_SaveIntimatePartnerRequest, headers: Connect.Headers) async -> ResponseMessage<Calendar_V1_SaveIntimatePartnerResponse>
+
+    /// SaveCycleDay records (or changes) one logged day of someone's cycle in
+    /// the pair. Either member may log for either cycle. Idempotent by id.
+    @available(iOS 13, *)
+    func `saveCycleDay`(request: Calendar_V1_SaveCycleDayRequest, headers: Connect.Headers) async -> ResponseMessage<Calendar_V1_SaveCycleDayResponse>
+
+    @available(iOS 13, *)
+    func `deleteCycleDay`(request: Calendar_V1_DeleteCycleDayRequest, headers: Connect.Headers) async -> ResponseMessage<Calendar_V1_DeleteCycleDayResponse>
+
+    /// SaveCycleSettings sets a member's typical cycle and period length.
+    @available(iOS 13, *)
+    func `saveCycleSettings`(request: Calendar_V1_SaveCycleSettingsRequest, headers: Connect.Headers) async -> ResponseMessage<Calendar_V1_SaveCycleSettingsResponse>
 }
 
 /// Concrete implementation of `Calendar_V1_CalendarServiceClientInterface`.
@@ -202,6 +214,21 @@ public final class Calendar_V1_CalendarServiceClient: Calendar_V1_CalendarServic
         return await self.client.unary(path: "/calendar.v1.CalendarService/SaveIntimatePartner", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `saveCycleDay`(request: Calendar_V1_SaveCycleDayRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Calendar_V1_SaveCycleDayResponse> {
+        return await self.client.unary(path: "/calendar.v1.CalendarService/SaveCycleDay", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `deleteCycleDay`(request: Calendar_V1_DeleteCycleDayRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Calendar_V1_DeleteCycleDayResponse> {
+        return await self.client.unary(path: "/calendar.v1.CalendarService/DeleteCycleDay", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `saveCycleSettings`(request: Calendar_V1_SaveCycleSettingsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Calendar_V1_SaveCycleSettingsResponse> {
+        return await self.client.unary(path: "/calendar.v1.CalendarService/SaveCycleSettings", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let sync = Connect.MethodSpec(name: "Sync", service: "calendar.v1.CalendarService", type: .unary)
@@ -219,6 +246,9 @@ public final class Calendar_V1_CalendarServiceClient: Calendar_V1_CalendarServic
             public static let saveIntimateEntry = Connect.MethodSpec(name: "SaveIntimateEntry", service: "calendar.v1.CalendarService", type: .unary)
             public static let deleteIntimateEntry = Connect.MethodSpec(name: "DeleteIntimateEntry", service: "calendar.v1.CalendarService", type: .unary)
             public static let saveIntimatePartner = Connect.MethodSpec(name: "SaveIntimatePartner", service: "calendar.v1.CalendarService", type: .unary)
+            public static let saveCycleDay = Connect.MethodSpec(name: "SaveCycleDay", service: "calendar.v1.CalendarService", type: .unary)
+            public static let deleteCycleDay = Connect.MethodSpec(name: "DeleteCycleDay", service: "calendar.v1.CalendarService", type: .unary)
+            public static let saveCycleSettings = Connect.MethodSpec(name: "SaveCycleSettings", service: "calendar.v1.CalendarService", type: .unary)
         }
     }
 }
