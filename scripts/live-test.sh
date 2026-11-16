@@ -14,6 +14,8 @@ PARTNER=${2:?usage: scripts/live-test.sh <owner-uuid> <partner-uuid> (test accou
 SERVER=../mvCalendar
 BASE=${BASE:-http://localhost:6100}   # a throwaway server: BASE=http://localhost:6101 CAL_DB=<its container>
 SIM=${SIM:-CalendarLab27}
+SIM_ID=$(xcrun simctl list devices available | sed -nE "s/^ +$SIM \(([0-9A-F-]{36})\).*/\1/p" | head -1)   # by id: xcodebuild sometimes misses a sim by name
+[ -n "$SIM_ID" ] || { echo "no simulator named $SIM"; exit 2; }
 
 curl -fsS "$BASE/health" >/dev/null || { echo "mvCalendar isn't up at $BASE (cd $SERVER && docker compose up -d)"; exit 2; }
 psql_cal() { docker exec "${CAL_DB:-cal-db}" psql -U cal -d cal -Atc "$1"; }
@@ -34,5 +36,5 @@ trap "exit 130" INT TERM
 TEST_RUNNER_CAL_LIVE_BASE=$BASE \
 TEST_RUNNER_CAL_LIVE_OWNER=$OWNER TEST_RUNNER_CAL_LIVE_PARTNER=$PARTNER \
 TEST_RUNNER_CAL_LIVE_OWNER_TOKEN=$(mint "$OWNER") TEST_RUNNER_CAL_LIVE_PARTNER_TOKEN=$(mint "$PARTNER") \
-  xcodebuild test -scheme CalendarKit -destination "platform=iOS Simulator,name=$SIM" \
+  xcodebuild test -scheme CalendarKit -destination "platform=iOS Simulator,id=$SIM_ID" \
     -only-testing:CalendarKitTests/LiveTransportTests 2>&1 | grep -E "✔|✘|error:|Test run|recorded an issue"

@@ -6,6 +6,8 @@ cd "$(dirname "$0")/.."
 USER_ID=${1:?usage: scripts/ui-test.sh <test-account-uuid>}
 SERVER=../mvCalendar
 SIM=${SIM:-CalendarLab27}
+SIM_ID=$(xcrun simctl list devices available | sed -nE "s/^ +$SIM \(([0-9A-F-]{36})\).*/\1/p" | head -1)   # by id: xcodebuild sometimes misses a sim by name
+[ -n "$SIM_ID" ] || { echo "no simulator named $SIM"; exit 2; }
 DD=${DD:-/tmp/calab-dd}   # build folder: give each resident their own
 ONLY=${ONLY:-}            # one test method, e.g. ONLY=testEditorAndDetailTour
 BASE=${BASE:-http://localhost:6100}   # a throwaway server: BASE=http://localhost:6101 CAL_DB=<its container>
@@ -25,7 +27,7 @@ rm -rf "$RESULT" /tmp/calendarlab-shots
 cd Demo
 TEST_RUNNER_CAL_DEV_TOKEN=$TOKEN TEST_RUNNER_CAL_DEV_USER=$USER_ID \
   xcodebuild test -project CalendarLab.xcodeproj -scheme CalendarLab \
-    -destination "platform=iOS Simulator,name=$SIM" -derivedDataPath "$DD" \
+    -destination "platform=iOS Simulator,id=$SIM_ID" -derivedDataPath "$DD" \
     -resultBundlePath "$RESULT" ${ONLY:+-only-testing:CalendarLabUITests/CalendarLabUITests/$ONLY} 2>&1 | grep -E "Test Case .*(passed|failed)|error:|\*\* TEST" || true
 xcrun xcresulttool export attachments --path "$RESULT" --output-path /tmp/calendarlab-shots >/dev/null 2>&1 || true
 ls /tmp/calendarlab-shots 2>/dev/null | head -20
