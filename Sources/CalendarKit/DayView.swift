@@ -95,7 +95,7 @@ struct DayView: View {
             .accessibilityAddTraits(.isHeader)
             .accessibilityIdentifier("dayViewHeader")
             HStack(spacing: 8) {
-                Button { step(-1) } label: { Image(systemName: "chevron.left").frame(width: 28, height: 28) }
+                Button { step(-1) } label: { Image(systemName: "chevron.left").frame(width: 30, height: 30) }
                     .cardButton(circle: true)
                     .accessibilityLabel("Previous day")
                 Spacer(minLength: 0)
@@ -104,7 +104,7 @@ struct DayView: View {
                         .cardButton()
                 }
                 Spacer(minLength: 0)
-                Button { step(1) } label: { Image(systemName: "chevron.right").frame(width: 28, height: 28) }
+                Button { step(1) } label: { Image(systemName: "chevron.right").frame(width: 30, height: 30) }
                     .cardButton(circle: true)
                     .accessibilityLabel("Next day")
             }
