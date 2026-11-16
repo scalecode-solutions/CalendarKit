@@ -297,6 +297,7 @@ public struct CalendarView: View {
     private func grid(_ index: [CalDate: [CalOccurrence]]) -> some View {
         let days = layout.weeks.flatMap { $0 }
         let marks = PrivateIndex.marks(engine: engine, from: days.first!, through: days.last!, zone: zone, scope: scope)
+        let strip = marks.values.contains { !$0.hearts.isEmpty }
         return VStack(spacing: 2) {
             ForEach(layout.weeks, id: \.first) { week in
                 // A faint rule above every week but the first: a day's chips
@@ -308,7 +309,8 @@ public struct CalendarView: View {
                         let occ = index[day] ?? []
                         Button { openDay = day } label: {
                             DayCell(day: day, inMonth: layout.contains(day), isToday: day == today,
-                                    chips: DayChip.chips(occ), eventCount: occ.count, marks: marks[day])
+                                    chips: DayChip.chips(occ), eventCount: occ.count, marks: marks[day],
+                                    heartStrip: strip)
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(DayCell.spoken(day, isToday: day == today, events: occ.count, marks: marks[day]))
@@ -714,6 +716,8 @@ struct DayCell: View {
     let chips: DayChip.Line
     var eventCount = 0
     var marks: PrivateMarks? = nil
+    /// The month has hearts: reserve the strip above every number.
+    var heartStrip = false
     @Environment(\.calendarAccent) private var accent
     /// The day's disc grows with Dynamic Type, up to what a seventh of a phone
     /// fits; past that the number shrinks to fit.
@@ -729,6 +733,14 @@ struct DayCell: View {
 
     var body: some View {
         VStack(spacing: 3) {
+            // A strip of its own above the number, when this month has any
+            // hearts (every cell gets it, so the weeks stay one height): at
+            // the largest text sizes a heart in a corner covered two-digit numbers.
+            if heartStrip {
+                HeartMarks(hearts: marks?.hearts ?? [], size: min(chipHeight, 18) * 0.8)
+                    .padding(.horizontal, 2)
+                    .frame(height: min(chipHeight, 18) * 0.8 * 1.3)
+            }
             Text("\(day.day)")
                 .font(.callout.weight(isToday ? .semibold : .regular))
                 .foregroundStyle(numberStyle)
@@ -743,11 +755,7 @@ struct DayCell: View {
                 .background {
                     if let k = marks?.cycle { CycleBand(kind: k, height: min(disc, 44) * 0.8).padding(.horizontal, -1.5) }
                 }
-                .overlay(alignment: .top) {
-                    if let h = marks?.hearts, !h.isEmpty {
-                        HeartMarks(hearts: h, size: min(chipHeight, 18) * 0.8).padding(.horizontal, 1).offset(y: -3)
-                    }
-                }
+
             // Two lines of chips, always reserved so every week row is the
             // same height: two titles, or one and "+N".
             VStack(spacing: 2) {

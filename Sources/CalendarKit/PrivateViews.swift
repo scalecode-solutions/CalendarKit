@@ -159,9 +159,8 @@ struct DashedRule: View {
     }
 }
 
-/// A day's hearts in the top corners of its cell (plan decisions 6 and 9):
-/// one per author (the first on the leading side, the second on the
-/// trailing one, clear of the centered number), in the partner's color or
+/// A day's hearts in the strip above its number (plan decisions 6 and 9):
+/// one per author (one centered; two, one at each side), in the partner's color or
 /// the author's, hollow while who is still unset. A count of more than one
 /// sits inside its heart. Each has a halo in the card's color, so a heart
 /// reads on any cycle band whatever color it is (Torsion's review).
@@ -170,10 +169,15 @@ struct HeartMarks: View {
     let size: CGFloat
 
     var body: some View {
+        // One heart centered over the number; two, one at each side.
         HStack(alignment: .top, spacing: 0) {
-            if let first = hearts.first { HeartMark(heart: first, size: size) }
-            Spacer(minLength: 0)
-            if hearts.count > 1 { HeartMark(heart: hearts[1], size: size) }
+            if hearts.count > 1 {
+                HeartMark(heart: hearts[0], size: size)
+                Spacer(minLength: 0)
+                HeartMark(heart: hearts[1], size: size)
+            } else if let only = hearts.first {
+                HeartMark(heart: only, size: size).frame(maxWidth: .infinity)
+            }
         }
         .accessibilityHidden(true)
     }
@@ -288,6 +292,7 @@ struct PrivateDaySections: View {
         }
         .padding(16)
         .calendarCard(cornerRadius: 20)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("intimateSection")
     }
 }
@@ -398,6 +403,7 @@ struct CycleDaySection: View {
         }
         .padding(16)
         .calendarCard(cornerRadius: 20)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("cycleSection")
         .sheet(isPresented: $legend) { CycleLegend().presentationDetents([.medium, .large]) }
     }
