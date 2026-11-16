@@ -54,9 +54,19 @@ enum CalendarSchemaV2: VersionedSchema {
     }
 }
 
+/// V3: private entries and the pair's partners (0.8.0 design sprint,
+/// PROVISIONAL). A new table only, so the stage is lightweight.
+enum CalendarSchemaV3: VersionedSchema {
+    static let versionIdentifier = Schema.Version(3, 0, 0)
+    static var models: [any PersistentModel.Type] {
+        [CalendarRecord.self, EventRecord.self, LabelRecord.self, SyncStateRecord.self, PendingWriteRecord.self,
+         PrivateRecord.self]
+    }
+}
+
 enum CalendarMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [any VersionedSchema.Type] { [CalendarSchemaV1.self, CalendarSchemaV2.self] }
-    static var stages: [MigrationStage] { [v1ToV2] }
+    static var schemas: [any VersionedSchema.Type] { [CalendarSchemaV1.self, CalendarSchemaV2.self, CalendarSchemaV3.self] }
+    static var stages: [MigrationStage] { [v1ToV2, .lightweight(fromVersion: CalendarSchemaV2.self, toVersion: CalendarSchemaV3.self)] }
 
     /// Reminder writes still queued from V1 can't be sent any more (the
     /// server has no such call) and no longer decode, so they'd sit in the
@@ -144,6 +154,25 @@ final class LabelRecord {
         self.id = id
         self.calendarID = calendarID
         self.payload = payload
+    }
+}
+
+/// A private entry or a name on a pair's partner list (kind "entry" or
+/// "partner"), kept apart from events: its own stream, its own reset.
+@Model
+final class PrivateRecord {
+    @Attribute(.unique) var id: UUID
+    var calendarID: UUID
+    var kind: String
+    var payload: Data      // CalPrivateEntry or CalPartner
+    var pending: Bool
+
+    init(id: UUID, calendarID: UUID, kind: String, payload: Data, pending: Bool) {
+        self.id = id
+        self.calendarID = calendarID
+        self.kind = kind
+        self.payload = payload
+        self.pending = pending
     }
 }
 
@@ -237,7 +266,7 @@ final class CalendarStore {
 
     /// `url`: tests only, a store file of their own.
     init(userID: UUID, appGroup: String?, directory: URL? = nil, inMemory: Bool = false, url: URL? = nil) throws {
-        let schema = Schema(versionedSchema: CalendarSchemaV2.self)
+        let schema = Schema(versionedSchema: CalendarSchemaV3.self)
         if let directory, url == nil, !inMemory {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
@@ -249,7 +278,7 @@ final class CalendarStore {
     /// Where a user's store lives, decided the same way for opening it and
     /// for deleting it without opening it.
     nonisolated static func configuration(userID: UUID, appGroup: String?, directory: URL?, inMemory: Bool,
-                                          url: URL? = nil, schema: Schema = Schema(versionedSchema: CalendarSchemaV2.self))
+                                          url: URL? = nil, schema: Schema = Schema(versionedSchema: CalendarSchemaV3.self))
         -> ModelConfiguration {
         let name = "Calendar-\(userID.uuidString)"
         if let url {
@@ -307,8 +336,8 @@ final class CalendarStore {
     /// isn't there yet would come back as gone.
     func cursors() -> [UUID: CalCursor] {
         Dictionary(uniqueKeysWithValues: ((try? context.fetch(FetchDescriptor<CalendarRecord>())) ?? []).compactMap { r in
-            guard decode(CalCalendar.self, r.payload)?.listed ?? false else { return nil }
-            return (r.id, CalCursor(rev: r.cursor, loadFrom: r.loadFrom))
+            guard let c = decode(CalCalendar.self, r.payload), c.listed else { return nil }
+            return (r.id, CalCursor(rev: r.cursor, loadFrom: r.loadFrom, intimate: c.intimateCursor))
         })
     }
 
@@ -343,7 +372,9 @@ final class CalendarStore {
         for (i, c) in cals.enumerated() {
             if let r = calendarRecord(c.id) {
                 var c = c
-                c.autoColor = decode(CalCalendar.self, r.payload)?.autoColor
+                let had = decode(CalCalendar.self, r.payload)
+                c.autoColor = had?.autoColor
+                c.intimateCursor = had?.intimateCursor ?? 0
                 r.payload = encode(c)
                 r.position = i
             } else {
@@ -568,6 +599,57 @@ final class CalendarStore {
         }
     }
 
+    // MARK: private entries and partners
+
+    private func privateRecord(_ id: UUID) -> PrivateRecord? {
+        try? context.fetch(FetchDescriptor<PrivateRecord>(predicate: #Predicate { $0.id == id })).first
+    }
+
+    /// Bumped by every change to private rows, like eventChanges.
+    private(set) var privateChanges = 0
+
+    func putPrivate(_ e: CalPrivateEntry, pending: Bool) {
+        privateChanges += 1
+        if let r = privateRecord(e.id) { r.payload = encode(e); r.pending = pending }
+        else { context.insert(PrivateRecord(id: e.id, calendarID: e.calendarID, kind: "entry", payload: encode(e), pending: pending)) }
+    }
+
+    func putPartner(_ p: CalPartner) {
+        privateChanges += 1
+        if let r = privateRecord(p.id) { r.payload = encode(p) }
+        else { context.insert(PrivateRecord(id: p.id, calendarID: p.calendarID, kind: "partner", payload: encode(p), pending: false)) }
+    }
+
+    func removePrivate(_ id: UUID) {
+        privateChanges += 1
+        try? context.delete(model: PrivateRecord.self, where: #Predicate { $0.id == id })
+    }
+
+    func privateEntry(_ id: UUID) -> CalPrivateEntry? { privateRecord(id).flatMap { decode(CalPrivateEntry.self, $0.payload) } }
+    func isPrivatePending(_ id: UUID) -> Bool { privateRecord(id)?.pending ?? false }
+
+    func privateEntries() -> [CalPrivateEntry] {
+        ((try? context.fetch(FetchDescriptor<PrivateRecord>(predicate: #Predicate { $0.kind == "entry" }))) ?? [])
+            .compactMap { decode(CalPrivateEntry.self, $0.payload) }
+    }
+
+    func partners() -> [CalPartner] {
+        ((try? context.fetch(FetchDescriptor<PrivateRecord>(predicate: #Predicate { $0.kind == "partner" }))) ?? [])
+            .compactMap { decode(CalPartner.self, $0.payload) }
+    }
+
+    /// Consent is off (or the cursor was too old): drop every private row of
+    /// a calendar, and its private cursor.
+    func clearPrivate(_ calendarID: UUID) {
+        privateChanges += 1
+        try? context.delete(model: PrivateRecord.self, where: #Predicate { $0.calendarID == calendarID })
+        updateCalendar(calendarID) { $0.intimateCursor = 0 }
+    }
+
+    func setPrivateCursor(_ calendarID: UUID, _ rev: Int64) {
+        updateCalendar(calendarID) { $0.intimateCursor = rev }
+    }
+
     /// Sign-out: delete everything.
     func wipeAll() {
         eventChanges += 1
@@ -576,6 +658,7 @@ final class CalendarStore {
         try? context.delete(model: LabelRecord.self)
         try? context.delete(model: SyncStateRecord.self)
         try? context.delete(model: PendingWriteRecord.self)
+        try? context.delete(model: PrivateRecord.self)
         save()
     }
 }
