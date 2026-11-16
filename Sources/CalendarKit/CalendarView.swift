@@ -483,53 +483,87 @@ struct WeekStrip: View {
     }
 }
 
-/// An agenda row: the time first, then the event (Fantastical's reading order).
+/// An agenda row, stacked so nothing is cut at large text sizes: the color
+/// bar down the left; the time (with who added it on the right); the title,
+/// full width; the location. Nothing has a line limit. VoiceOver reads it as
+/// one element, title first.
 struct AgendaRow: View {
     let occurrence: CalOccurrence
     let day: CalDate
     let engine: CalendarEngine
     let showOwner: Bool
     var inPair = false
-    @ScaledMetric(relativeTo: .subheadline) private var timeWidth: CGFloat = 64
 
     var body: some View {
+        let who = showOwner ? AuthorBadge.author(of: occurrence, engine: engine, inPair: inPair) : nil
+        let time = Self.timeLine(occurrence.when, on: day, zone: .current)
+        let location = occurrence.event.fields.location
         HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .trailing, spacing: 1) {
-                Text(times.0).font(.subheadline.weight(.medium)).monospacedDigit()
-                if let end = times.1 { Text(end).font(.caption).foregroundStyle(.secondary).monospacedDigit() }
-            }
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
-            .frame(width: min(timeWidth, 96), alignment: .trailing)
             RoundedRectangle(cornerRadius: 2).fill(CalTint(occurrence.color)).frame(width: 4)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(occurrence.title).font(.body.weight(.medium)).lineLimit(2)
-                if !occurrence.event.fields.location.isEmpty {
-                    Text(occurrence.event.fields.location).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .center, spacing: 6) {
+                    Text(time)
+                        .font(.subheadline.weight(.medium))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 4)
+                    if occurrence.seriesID != nil {
+                        Image(systemName: "repeat").font(.caption).foregroundStyle(.tertiary)
+                    }
+                    if let who { who }
+                }
+                Text(occurrence.title)
+                    .font(.body.weight(.medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                if !location.isEmpty {
+                    Text(location)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            Spacer(minLength: 6)
-            if occurrence.seriesID != nil {
-                Image(systemName: "repeat").font(.caption).foregroundStyle(.tertiary).accessibilityLabel("Repeats")
-            }
-            if showOwner, let who = AuthorBadge.author(of: occurrence, engine: engine, inPair: inPair) { who }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .calendarCard(cornerRadius: 20)
         .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Self.spoken(title: occurrence.title, time: time, location: location,
+                                        repeats: occurrence.seriesID != nil, who: who?.spokenName))
     }
 
-    /// Start and end, or "All day" (and which day of several).
-    private var times: (String, String?) {
-        switch occurrence.when {
+    /// What VoiceOver says: what it is first, then when, where, and whose.
+    nonisolated static func spoken(title: String, time: String, location: String, repeats: Bool, who: String?) -> String {
+        var parts = [title, time]
+        if !location.isEmpty { parts.append(location) }
+        if repeats { parts.append(String(localized: "Repeats")) }
+        if let who { parts.append(who) }
+        return parts.joined(separator: ", ")
+    }
+
+    /// The time line: "9:00 – 10:00 AM", with the dates when it crosses
+    /// midnight, just the start for a moment, or "All day" (with "day 2 of 3"
+    /// for a run). The formatter keeps "9:00 AM" together, so a wrap only
+    /// falls at the dash or between date and time.
+    nonisolated static func timeLine(_ when: CalWhen, on day: CalDate, zone: TimeZone) -> String {
+        switch when {
         case .allDay(let s, let e):
             let n = s.days(to: e)
-            return ("All day", n > 1 ? "\(s.days(to: day) + 1) of \(n)" : nil)
+            return n > 1 ? String(localized: "All day · day \(s.days(to: day) + 1) of \(n)") : String(localized: "All day")
         case .timed(let s, let e, _):
-            let f = CalFormat.styles(date: .none, time: .short)
-            return (f.string(from: s), s == e ? nil : f.string(from: e))
+            // Each end formatted on its own: DateIntervalFormatter prints both
+            // dates whenever the ends fall on different days, even for an end
+            // at midnight.
+            let time = CalFormat.template("jmm", zone: zone)
+            if s == e { return time.string(from: s) }
+            // An end exactly at midnight belongs to the day before.
+            if CalDate(s, in: zone) == CalDate(e.addingTimeInterval(-1), in: zone) {
+                return "\(time.string(from: s)) – \(time.string(from: e))"
+            }
+            let dated = CalFormat.template("MMMdjmm", zone: zone)
+            return "\(dated.string(from: s)) – \(dated.string(from: e))"
         }
     }
 }
@@ -703,10 +737,13 @@ struct AuthorBadge: View {
     let addedByOther: Bool
     var size: CGFloat = 22
 
+    /// What it says to VoiceOver.
+    var spokenName: String { addedByOther ? "Added by \(name)" : name }
+
     var body: some View {
         CalAvatar(contact: contact, fallbackName: name, tint: tint, size: size)
             .accessibilityHidden(false)
-            .accessibilityLabel(addedByOther ? "Added by \(name)" : name)
+            .accessibilityLabel(spokenName)
     }
 
     /// Across every pair: whose pair it's on (the other person). Inside one
