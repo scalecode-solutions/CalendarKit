@@ -10,6 +10,7 @@ SIM_ID=$(xcrun simctl list devices available | sed -nE "s/^ +$SIM \(([0-9A-F-]{3
 [ -n "$SIM_ID" ] || { echo "no simulator named $SIM"; exit 2; }
 DD=${DD:-/tmp/calab-dd}   # build folder: give each resident their own
 ONLY=${ONLY:-}            # one test method, e.g. ONLY=testEditorAndDetailTour (or Class/method)
+# LAB_FRIEND=<friend uuid>: LabShellUITests' conversation (they skip without it).
 # A bare method name is one of CalendarLabUITests'; a capitalized bare name is a class.
 [[ -n "$ONLY" && "$ONLY" != */* && "$ONLY" != [A-Z]* ]] && ONLY=CalendarLabUITests/$ONLY
 BASE=${BASE:-http://localhost:6100}   # a throwaway server: BASE=http://localhost:6101 CAL_DB=<its container>
@@ -43,7 +44,7 @@ TOKEN=$(cd "$SERVER" && go run ./cmd/minttoken "$KEY" "$USER_ID")
 RESULT=/tmp/calendarlab-ui.xcresult
 rm -rf "$RESULT" /tmp/calendarlab-shots
 cd Demo
-TEST_RUNNER_CAL_DEV_TOKEN=$TOKEN TEST_RUNNER_CAL_DEV_USER=$USER_ID TEST_RUNNER_CONSENT_FROM=${CONSENT_FROM:-} \
+TEST_RUNNER_CAL_DEV_TOKEN=$TOKEN TEST_RUNNER_CAL_DEV_USER=$USER_ID TEST_RUNNER_CONSENT_FROM=${CONSENT_FROM:-} TEST_RUNNER_LAB_FRIEND=${LAB_FRIEND:-} \
   xcodebuild test -project CalendarLab.xcodeproj -scheme CalendarLab \
     -destination "platform=iOS Simulator,id=$SIM_ID" -derivedDataPath "$DD" \
     -resultBundlePath "$RESULT" ${ONLY:+-only-testing:CalendarLabUITests/$ONLY} 2>&1 | grep -E "Test Case .*(passed|failed)|error:|\*\* TEST" || true

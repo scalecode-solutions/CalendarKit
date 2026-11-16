@@ -137,13 +137,24 @@ final class CalendarLabUITests: XCTestCase {
         XCTAssert(row.waitForNonExistence(timeout: 5))
         back()
 
-        // The settings, the pair it went to, and that pair's history (from
-        // the server): both the add and the delete, by "You".
+        // The pair it went to (the first shown one, as the editor picks it),
+        // and that pair's history (from the server): both the add and the
+        // delete, by "You". A pair's own settings live with the conversation:
+        // Chats → the friend → tap the name → Calendar → Activity.
         app.buttons["Account"].tap()
         XCTAssert(app.navigationBars["Calendars"].waitForExistence(timeout: 5))
         shot("5-calendars")
-        pairRow().tap()
-        app.buttons["Activity"].tap()
+        let name = String(pairRow().label.split(separator: ",").first ?? "")
+        XCTAssertFalse(name.isEmpty, "the pair's row has no name")
+        app.navigationBars.buttons.element(boundBy: 0).tap() // settings → calendar
+        app.navigationBars.buttons.element(boundBy: 0).tap() // calendar → Home
+        app.tabBars.buttons["Chats"].tap()
+        let chat = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'chat.' AND label CONTAINS %@", name)).firstMatch
+        XCTAssert(chat.waitForExistence(timeout: 15), "no chat with \(name)")
+        chat.tap()
+        app.buttons["conversation.settings"].tap()
+        app.buttons["conversation.settings.calendar"].tap()
+        app.buttons["pair.activity"].tap()
         let added = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'You added “UI test lunch”'")).firstMatch
         XCTAssert(added.waitForExistence(timeout: 10), "the pair's activity doesn't show the add")
         shot("6-activity")
@@ -151,7 +162,9 @@ final class CalendarLabUITests: XCTestCase {
 
     /// A pair's row in the calendar settings (each says Shown or Hidden).
     func pairRow() -> XCUIElement {
-        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Shown' OR label CONTAINS 'Hidden'")).firstMatch
+        // Not a button any more: the row only shows and colors the pair; its own
+        // settings are with the conversation.
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS ', Shown' OR label CONTAINS ', Hidden'")).firstMatch
         XCTAssert(row.waitForExistence(timeout: 10), "no pair in the settings")
         return row
     }
