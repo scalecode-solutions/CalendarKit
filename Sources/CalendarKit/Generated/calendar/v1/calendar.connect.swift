@@ -98,6 +98,25 @@ public protocol Calendar_V1_CalendarServiceClientInterface: Sendable {
     /// either of them made (their own included). Keyset-paged. Frozen pairs too.
     @available(iOS 13, *)
     func `listActivity`(request: Calendar_V1_ListActivityRequest, headers: Connect.Headers) async -> ResponseMessage<Calendar_V1_ListActivityResponse>
+
+    /// SetConsent turns the caller's own consent for one kind on or off. On
+    /// needs the two to be friends now; off is always allowed (frozen too).
+    @available(iOS 13, *)
+    func `setConsent`(request: Calendar_V1_SetConsentRequest, headers: Connect.Headers) async -> ResponseMessage<Calendar_V1_SetConsentResponse>
+
+    /// SaveIntimateEntry creates (base_rev 0; idempotent by the client's id) or
+    /// replaces an entry. Members only, both consented, not frozen.
+    @available(iOS 13, *)
+    func `saveIntimateEntry`(request: Calendar_V1_SaveIntimateEntryRequest, headers: Connect.Headers) async -> ResponseMessage<Calendar_V1_SaveIntimateEntryResponse>
+
+    /// DeleteIntimateEntry tombstones an entry (base_rev as UpdateEvent).
+    @available(iOS 13, *)
+    func `deleteIntimateEntry`(request: Calendar_V1_DeleteIntimateEntryRequest, headers: Connect.Headers) async -> ResponseMessage<Calendar_V1_DeleteIntimateEntryResponse>
+
+    /// SaveIntimatePartner creates or changes a name on the pair's partner list
+    /// (archive instead of delete: entries keep pointing at it).
+    @available(iOS 13, *)
+    func `saveIntimatePartner`(request: Calendar_V1_SaveIntimatePartnerRequest, headers: Connect.Headers) async -> ResponseMessage<Calendar_V1_SaveIntimatePartnerResponse>
 }
 
 /// Concrete implementation of `Calendar_V1_CalendarServiceClientInterface`.
@@ -163,6 +182,26 @@ public final class Calendar_V1_CalendarServiceClient: Calendar_V1_CalendarServic
         return await self.client.unary(path: "/calendar.v1.CalendarService/ListActivity", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `setConsent`(request: Calendar_V1_SetConsentRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Calendar_V1_SetConsentResponse> {
+        return await self.client.unary(path: "/calendar.v1.CalendarService/SetConsent", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `saveIntimateEntry`(request: Calendar_V1_SaveIntimateEntryRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Calendar_V1_SaveIntimateEntryResponse> {
+        return await self.client.unary(path: "/calendar.v1.CalendarService/SaveIntimateEntry", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `deleteIntimateEntry`(request: Calendar_V1_DeleteIntimateEntryRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Calendar_V1_DeleteIntimateEntryResponse> {
+        return await self.client.unary(path: "/calendar.v1.CalendarService/DeleteIntimateEntry", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `saveIntimatePartner`(request: Calendar_V1_SaveIntimatePartnerRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Calendar_V1_SaveIntimatePartnerResponse> {
+        return await self.client.unary(path: "/calendar.v1.CalendarService/SaveIntimatePartner", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let sync = Connect.MethodSpec(name: "Sync", service: "calendar.v1.CalendarService", type: .unary)
@@ -176,6 +215,10 @@ public final class Calendar_V1_CalendarServiceClient: Calendar_V1_CalendarServic
             public static let saveLabel = Connect.MethodSpec(name: "SaveLabel", service: "calendar.v1.CalendarService", type: .unary)
             public static let deleteLabel = Connect.MethodSpec(name: "DeleteLabel", service: "calendar.v1.CalendarService", type: .unary)
             public static let listActivity = Connect.MethodSpec(name: "ListActivity", service: "calendar.v1.CalendarService", type: .unary)
+            public static let setConsent = Connect.MethodSpec(name: "SetConsent", service: "calendar.v1.CalendarService", type: .unary)
+            public static let saveIntimateEntry = Connect.MethodSpec(name: "SaveIntimateEntry", service: "calendar.v1.CalendarService", type: .unary)
+            public static let deleteIntimateEntry = Connect.MethodSpec(name: "DeleteIntimateEntry", service: "calendar.v1.CalendarService", type: .unary)
+            public static let saveIntimatePartner = Connect.MethodSpec(name: "SaveIntimatePartner", service: "calendar.v1.CalendarService", type: .unary)
         }
     }
 }

@@ -176,6 +176,44 @@ public nonisolated enum Calendar_V1_MonthlyMode: SwiftProtobuf.Enum, Swift.CaseI
 
 }
 
+public nonisolated enum Calendar_V1_ConsentKind: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case intimate // = 1
+  case cycle // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .intimate
+    case 2: self = .cycle
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .intimate: return 1
+    case .cycle: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Calendar_V1_ConsentKind] = [
+    .unspecified,
+    .intimate,
+    .cycle,
+  ]
+
+}
+
 /// Date is a calendar day with no time or zone (all-day events).
 public nonisolated struct Calendar_V1_Date: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
@@ -239,6 +277,21 @@ public nonisolated struct Calendar_V1_Calendar: Sendable {
   /// The two aren't friends any more (or one account is gone): readable, every
   /// write answers PermissionDenied. Back to false the moment they are again.
   public var frozen: Bool = false
+
+  /// Consent (0.8.0, PROVISIONAL): each member's own, per kind. A kind is on
+  /// only when both are true. The other member's is shown so the app can say
+  /// "waiting for them".
+  public var intimateMine: Bool = false
+
+  public var intimateTheirs: Bool = false
+
+  /// cycle tracking (v1.1): the column exists, nothing uses it yet
+  public var cycleMine: Bool = false
+
+  public var cycleTheirs: Bool = false
+
+  /// The intimate stream's newest change; 0 and meaningless while it's off.
+  public var intimateRev: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -564,6 +617,9 @@ public nonisolated struct Calendar_V1_CalendarCursor: Sendable {
   /// Mid full load: echo the load_from of the last delta (0 otherwise).
   public var loadFrom: Int64 = 0
 
+  /// The intimate stream's cursor (0 = none held).
+  public var intimateRev: Int64 = 0
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -609,6 +665,20 @@ public nonisolated struct Calendar_V1_CalendarDelta: Sendable {
   /// the load started. Send it back on the cursor until has_more is false, so a
   /// purge during the load is judged against the load, not the page.
   public var loadFrom: Int64 = 0
+
+  /// The intimate stream (only while both consented): changes since the
+  /// cursor's intimate_rev, with its own next cursor and paging.
+  public var intimateEntries: [Calendar_V1_IntimateEntry] = []
+
+  public var intimatePartners: [Calendar_V1_IntimatePartner] = []
+
+  public var intimateRev: Int64 = 0
+
+  public var intimateHasMore: Bool = false
+
+  /// Drop every intimate row held for this calendar: consent is off (or the
+  /// cursor was purged past; then the stream follows from the start).
+  public var intimateReset: Bool = false
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1049,6 +1119,348 @@ public nonisolated struct Calendar_V1_ListActivityResponse: Sendable {
   public init() {}
 }
 
+public nonisolated struct Calendar_V1_SetConsentRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var calendarID: String = String()
+
+  public var kind: Calendar_V1_ConsentKind = .unspecified
+
+  public var on: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Calendar_V1_SetConsentResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var calendar: Calendar_V1_Calendar {
+    get {_calendar ?? Calendar_V1_Calendar()}
+    set {_calendar = newValue}
+  }
+  /// Returns true if `calendar` has been explicitly set.
+  public var hasCalendar: Bool {self._calendar != nil}
+  /// Clears the value of `calendar`. Subsequent reads from it will return its default value.
+  public mutating func clearCalendar() {self._calendar = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _calendar: Calendar_V1_Calendar? = nil
+}
+
+/// Who finished inside, per partner (a group entry can differ).
+public nonisolated struct Calendar_V1_FinishedInside: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var partnerID: String = String()
+
+  /// yes | no | unsure
+  public var value: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// What a person records; the server seals all of it.
+public nonisolated struct Calendar_V1_IntimateContent: @unchecked Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// epoch ms
+  public var at: Int64 {
+    get {_storage._at}
+    set {_uniqueStorage()._at = newValue}
+  }
+
+  public var timeZone: String {
+    get {_storage._timeZone}
+    set {_uniqueStorage()._timeZone = newValue}
+  }
+
+  public var durationMin: Int32 {
+    get {_storage._durationMin}
+    set {_uniqueStorage()._durationMin = newValue}
+  }
+
+  public var foreplayMin: Int32 {
+    get {_storage._foreplayMin}
+    set {_uniqueStorage()._foreplayMin = newValue}
+  }
+
+  /// the pair's partner list; empty = who not set yet
+  public var partnerIds: [String] {
+    get {_storage._partnerIds}
+    set {_uniqueStorage()._partnerIds = newValue}
+  }
+
+  public var solo: Bool {
+    get {_storage._solo}
+    set {_uniqueStorage()._solo = newValue}
+  }
+
+  /// vaginal | anal | oral | manual | other
+  public var types: [String] {
+    get {_storage._types}
+    set {_uniqueStorage()._types = newValue}
+  }
+
+  /// none | condom | pill | iud | withdrawal | other
+  public var protection: [String] {
+    get {_storage._protection}
+    set {_uniqueStorage()._protection = newValue}
+  }
+
+  public var finishedInside: [Calendar_V1_FinishedInside] {
+    get {_storage._finishedInside}
+    set {_uniqueStorage()._finishedInside = newValue}
+  }
+
+  public var orgasmsMe: Int32 {
+    get {_storage._orgasmsMe}
+    set {_uniqueStorage()._orgasmsMe = newValue}
+  }
+
+  public var orgasmsPartner: Int32 {
+    get {_storage._orgasmsPartner}
+    set {_uniqueStorage()._orgasmsPartner = newValue}
+  }
+
+  /// me | partner | mutual | ""
+  public var initiatedBy: String {
+    get {_storage._initiatedBy}
+    set {_uniqueStorage()._initiatedBy = newValue}
+  }
+
+  /// bedroom | living_room | ... | other
+  public var location: String {
+    get {_storage._location}
+    set {_uniqueStorage()._location = newValue}
+  }
+
+  public var locationNote: String {
+    get {_storage._locationNote}
+    set {_uniqueStorage()._locationNote = newValue}
+  }
+
+  /// 0 = not rated, 1..5
+  public var satisfaction: Int32 {
+    get {_storage._satisfaction}
+    set {_uniqueStorage()._satisfaction = newValue}
+  }
+
+  public var notes: String {
+    get {_storage._notes}
+    set {_uniqueStorage()._notes = newValue}
+  }
+
+  /// logged in one tap, details later
+  public var quickLog: Bool {
+    get {_storage._quickLog}
+    set {_uniqueStorage()._quickLog = newValue}
+  }
+
+  public var positions: [String] {
+    get {_storage._positions}
+    set {_uniqueStorage()._positions = newValue}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+public nonisolated struct Calendar_V1_IntimateEntry: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: String = String()
+
+  public var calendarID: String = String()
+
+  public var content: Calendar_V1_IntimateContent {
+    get {_content ?? Calendar_V1_IntimateContent()}
+    set {_content = newValue}
+  }
+  /// Returns true if `content` has been explicitly set.
+  public var hasContent: Bool {self._content != nil}
+  /// Clears the value of `content`. Subsequent reads from it will return its default value.
+  public mutating func clearContent() {self._content = nil}
+
+  public var createdBy: String = String()
+
+  public var updatedBy: String = String()
+
+  public var createdAt: Int64 = 0
+
+  public var updatedAt: Int64 = 0
+
+  public var rev: Int64 = 0
+
+  public var deleted: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _content: Calendar_V1_IntimateContent? = nil
+}
+
+public nonisolated struct Calendar_V1_IntimatePartner: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: String = String()
+
+  public var calendarID: String = String()
+
+  public var name: String = String()
+
+  /// palette token; "" = none (the heart falls back to the author's)
+  public var color: String = String()
+
+  public var archived: Bool = false
+
+  public var rev: Int64 = 0
+
+  public var deleted: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Calendar_V1_SaveIntimateEntryRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: String = String()
+
+  public var calendarID: String = String()
+
+  /// 0 = create
+  public var baseRev: Int64 = 0
+
+  public var content: Calendar_V1_IntimateContent {
+    get {_content ?? Calendar_V1_IntimateContent()}
+    set {_content = newValue}
+  }
+  /// Returns true if `content` has been explicitly set.
+  public var hasContent: Bool {self._content != nil}
+  /// Clears the value of `content`. Subsequent reads from it will return its default value.
+  public mutating func clearContent() {self._content = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _content: Calendar_V1_IntimateContent? = nil
+}
+
+public nonisolated struct Calendar_V1_SaveIntimateEntryResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var entry: Calendar_V1_IntimateEntry {
+    get {_entry ?? Calendar_V1_IntimateEntry()}
+    set {_entry = newValue}
+  }
+  /// Returns true if `entry` has been explicitly set.
+  public var hasEntry: Bool {self._entry != nil}
+  /// Clears the value of `entry`. Subsequent reads from it will return its default value.
+  public mutating func clearEntry() {self._entry = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _entry: Calendar_V1_IntimateEntry? = nil
+}
+
+public nonisolated struct Calendar_V1_DeleteIntimateEntryRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: String = String()
+
+  public var baseRev: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Calendar_V1_DeleteIntimateEntryResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var rev: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Calendar_V1_SaveIntimatePartnerRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: String = String()
+
+  public var calendarID: String = String()
+
+  public var name: String = String()
+
+  public var color: String = String()
+
+  public var archived: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Calendar_V1_SaveIntimatePartnerResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var partner: Calendar_V1_IntimatePartner {
+    get {_partner ?? Calendar_V1_IntimatePartner()}
+    set {_partner = newValue}
+  }
+  /// Returns true if `partner` has been explicitly set.
+  public var hasPartner: Bool {self._partner != nil}
+  /// Clears the value of `partner`. Subsequent reads from it will return its default value.
+  public mutating func clearPartner() {self._partner = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _partner: Calendar_V1_IntimatePartner? = nil
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 fileprivate nonisolated let _protobuf_package = "calendar.v1"
@@ -1063,6 +1475,10 @@ nonisolated extension Calendar_V1_Weekday: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension Calendar_V1_MonthlyMode: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MONTHLY_MODE_UNSPECIFIED\0\u{1}MONTHLY_MODE_DAY_OF_MONTH\0\u{1}MONTHLY_MODE_NTH_WEEKDAY\0\u{1}MONTHLY_MODE_LAST_WEEKDAY\0")
+}
+
+nonisolated extension Calendar_V1_ConsentKind: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CONSENT_KIND_UNSPECIFIED\0\u{1}CONSENT_KIND_INTIMATE\0\u{1}CONSENT_KIND_CYCLE\0")
 }
 
 nonisolated extension Calendar_V1_Date: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
@@ -1147,7 +1563,7 @@ nonisolated extension Calendar_V1_Contact: SwiftProtobuf.Message, SwiftProtobuf.
 
 nonisolated extension Calendar_V1_Calendar: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Calendar"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{2}\u{2}name\0\u{2}\u{3}rev\0\u{2}\u{2}visible\0\u{3}pref_color\0\u{3}other_id\0\u{1}frozen\0\u{b}owner_id\0\u{b}color\0\u{b}role\0\u{b}grant_expires_at\0\u{c}\u{2}\u{1}\u{c}\u{4}\u{1}\u{c}\u{5}\u{1}\u{c}\u{7}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{2}\u{2}name\0\u{2}\u{3}rev\0\u{2}\u{2}visible\0\u{3}pref_color\0\u{3}other_id\0\u{1}frozen\0\u{3}intimate_mine\0\u{3}intimate_theirs\0\u{3}cycle_mine\0\u{3}cycle_theirs\0\u{3}intimate_rev\0\u{b}owner_id\0\u{b}color\0\u{b}role\0\u{b}grant_expires_at\0\u{c}\u{2}\u{1}\u{c}\u{4}\u{1}\u{c}\u{5}\u{1}\u{c}\u{7}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1162,6 +1578,11 @@ nonisolated extension Calendar_V1_Calendar: SwiftProtobuf.Message, SwiftProtobuf
       case 9: try { try decoder.decodeSingularStringField(value: &self.prefColor) }()
       case 10: try { try decoder.decodeSingularStringField(value: &self.otherID) }()
       case 11: try { try decoder.decodeSingularBoolField(value: &self.frozen) }()
+      case 12: try { try decoder.decodeSingularBoolField(value: &self.intimateMine) }()
+      case 13: try { try decoder.decodeSingularBoolField(value: &self.intimateTheirs) }()
+      case 14: try { try decoder.decodeSingularBoolField(value: &self.cycleMine) }()
+      case 15: try { try decoder.decodeSingularBoolField(value: &self.cycleTheirs) }()
+      case 16: try { try decoder.decodeSingularInt64Field(value: &self.intimateRev) }()
       default: break
       }
     }
@@ -1189,6 +1610,21 @@ nonisolated extension Calendar_V1_Calendar: SwiftProtobuf.Message, SwiftProtobuf
     if self.frozen != false {
       try visitor.visitSingularBoolField(value: self.frozen, fieldNumber: 11)
     }
+    if self.intimateMine != false {
+      try visitor.visitSingularBoolField(value: self.intimateMine, fieldNumber: 12)
+    }
+    if self.intimateTheirs != false {
+      try visitor.visitSingularBoolField(value: self.intimateTheirs, fieldNumber: 13)
+    }
+    if self.cycleMine != false {
+      try visitor.visitSingularBoolField(value: self.cycleMine, fieldNumber: 14)
+    }
+    if self.cycleTheirs != false {
+      try visitor.visitSingularBoolField(value: self.cycleTheirs, fieldNumber: 15)
+    }
+    if self.intimateRev != 0 {
+      try visitor.visitSingularInt64Field(value: self.intimateRev, fieldNumber: 16)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1200,6 +1636,11 @@ nonisolated extension Calendar_V1_Calendar: SwiftProtobuf.Message, SwiftProtobuf
     if lhs.prefColor != rhs.prefColor {return false}
     if lhs.otherID != rhs.otherID {return false}
     if lhs.frozen != rhs.frozen {return false}
+    if lhs.intimateMine != rhs.intimateMine {return false}
+    if lhs.intimateTheirs != rhs.intimateTheirs {return false}
+    if lhs.cycleMine != rhs.cycleMine {return false}
+    if lhs.cycleTheirs != rhs.cycleTheirs {return false}
+    if lhs.intimateRev != rhs.intimateRev {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1699,7 +2140,7 @@ nonisolated extension Calendar_V1_EventFields: SwiftProtobuf.Message, SwiftProto
 
 nonisolated extension Calendar_V1_CalendarCursor: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CalendarCursor"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}calendar_id\0\u{1}rev\0\u{3}load_from\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}calendar_id\0\u{1}rev\0\u{3}load_from\0\u{3}intimate_rev\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1710,6 +2151,7 @@ nonisolated extension Calendar_V1_CalendarCursor: SwiftProtobuf.Message, SwiftPr
       case 1: try { try decoder.decodeSingularStringField(value: &self.calendarID) }()
       case 2: try { try decoder.decodeSingularInt64Field(value: &self.rev) }()
       case 3: try { try decoder.decodeSingularInt64Field(value: &self.loadFrom) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.intimateRev) }()
       default: break
       }
     }
@@ -1725,6 +2167,9 @@ nonisolated extension Calendar_V1_CalendarCursor: SwiftProtobuf.Message, SwiftPr
     if self.loadFrom != 0 {
       try visitor.visitSingularInt64Field(value: self.loadFrom, fieldNumber: 3)
     }
+    if self.intimateRev != 0 {
+      try visitor.visitSingularInt64Field(value: self.intimateRev, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1732,6 +2177,7 @@ nonisolated extension Calendar_V1_CalendarCursor: SwiftProtobuf.Message, SwiftPr
     if lhs.calendarID != rhs.calendarID {return false}
     if lhs.rev != rhs.rev {return false}
     if lhs.loadFrom != rhs.loadFrom {return false}
+    if lhs.intimateRev != rhs.intimateRev {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1769,7 +2215,7 @@ nonisolated extension Calendar_V1_SyncRequest: SwiftProtobuf.Message, SwiftProto
 
 nonisolated extension Calendar_V1_CalendarDelta: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CalendarDelta"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}calendar_id\0\u{1}events\0\u{1}labels\0\u{1}rev\0\u{3}has_more\0\u{1}reload\0\u{3}load_from\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}calendar_id\0\u{1}events\0\u{1}labels\0\u{1}rev\0\u{3}has_more\0\u{1}reload\0\u{3}load_from\0\u{3}intimate_entries\0\u{3}intimate_partners\0\u{3}intimate_rev\0\u{3}intimate_has_more\0\u{3}intimate_reset\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1784,6 +2230,11 @@ nonisolated extension Calendar_V1_CalendarDelta: SwiftProtobuf.Message, SwiftPro
       case 5: try { try decoder.decodeSingularBoolField(value: &self.hasMore_p) }()
       case 6: try { try decoder.decodeSingularBoolField(value: &self.reload) }()
       case 7: try { try decoder.decodeSingularInt64Field(value: &self.loadFrom) }()
+      case 8: try { try decoder.decodeRepeatedMessageField(value: &self.intimateEntries) }()
+      case 9: try { try decoder.decodeRepeatedMessageField(value: &self.intimatePartners) }()
+      case 10: try { try decoder.decodeSingularInt64Field(value: &self.intimateRev) }()
+      case 11: try { try decoder.decodeSingularBoolField(value: &self.intimateHasMore) }()
+      case 12: try { try decoder.decodeSingularBoolField(value: &self.intimateReset) }()
       default: break
       }
     }
@@ -1811,6 +2262,21 @@ nonisolated extension Calendar_V1_CalendarDelta: SwiftProtobuf.Message, SwiftPro
     if self.loadFrom != 0 {
       try visitor.visitSingularInt64Field(value: self.loadFrom, fieldNumber: 7)
     }
+    if !self.intimateEntries.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.intimateEntries, fieldNumber: 8)
+    }
+    if !self.intimatePartners.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.intimatePartners, fieldNumber: 9)
+    }
+    if self.intimateRev != 0 {
+      try visitor.visitSingularInt64Field(value: self.intimateRev, fieldNumber: 10)
+    }
+    if self.intimateHasMore != false {
+      try visitor.visitSingularBoolField(value: self.intimateHasMore, fieldNumber: 11)
+    }
+    if self.intimateReset != false {
+      try visitor.visitSingularBoolField(value: self.intimateReset, fieldNumber: 12)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1822,6 +2288,11 @@ nonisolated extension Calendar_V1_CalendarDelta: SwiftProtobuf.Message, SwiftPro
     if lhs.hasMore_p != rhs.hasMore_p {return false}
     if lhs.reload != rhs.reload {return false}
     if lhs.loadFrom != rhs.loadFrom {return false}
+    if lhs.intimateEntries != rhs.intimateEntries {return false}
+    if lhs.intimatePartners != rhs.intimatePartners {return false}
+    if lhs.intimateRev != rhs.intimateRev {return false}
+    if lhs.intimateHasMore != rhs.intimateHasMore {return false}
+    if lhs.intimateReset != rhs.intimateReset {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -2636,6 +3107,666 @@ nonisolated extension Calendar_V1_ListActivityResponse: SwiftProtobuf.Message, S
   public static func ==(lhs: Calendar_V1_ListActivityResponse, rhs: Calendar_V1_ListActivityResponse) -> Bool {
     if lhs.activity != rhs.activity {return false}
     if lhs.nextCursor != rhs.nextCursor {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Calendar_V1_SetConsentRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SetConsentRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}calendar_id\0\u{1}kind\0\u{1}on\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.calendarID) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.kind) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.on) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.calendarID.isEmpty {
+      try visitor.visitSingularStringField(value: self.calendarID, fieldNumber: 1)
+    }
+    if self.kind != .unspecified {
+      try visitor.visitSingularEnumField(value: self.kind, fieldNumber: 2)
+    }
+    if self.on != false {
+      try visitor.visitSingularBoolField(value: self.on, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Calendar_V1_SetConsentRequest, rhs: Calendar_V1_SetConsentRequest) -> Bool {
+    if lhs.calendarID != rhs.calendarID {return false}
+    if lhs.kind != rhs.kind {return false}
+    if lhs.on != rhs.on {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Calendar_V1_SetConsentResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SetConsentResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}calendar\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._calendar) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._calendar {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Calendar_V1_SetConsentResponse, rhs: Calendar_V1_SetConsentResponse) -> Bool {
+    if lhs._calendar != rhs._calendar {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Calendar_V1_FinishedInside: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".FinishedInside"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}partner_id\0\u{1}value\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.partnerID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.value) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.partnerID.isEmpty {
+      try visitor.visitSingularStringField(value: self.partnerID, fieldNumber: 1)
+    }
+    if !self.value.isEmpty {
+      try visitor.visitSingularStringField(value: self.value, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Calendar_V1_FinishedInside, rhs: Calendar_V1_FinishedInside) -> Bool {
+    if lhs.partnerID != rhs.partnerID {return false}
+    if lhs.value != rhs.value {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Calendar_V1_IntimateContent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".IntimateContent"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}at\0\u{3}time_zone\0\u{3}duration_min\0\u{3}foreplay_min\0\u{3}partner_ids\0\u{1}solo\0\u{1}types\0\u{1}protection\0\u{3}finished_inside\0\u{3}orgasms_me\0\u{3}orgasms_partner\0\u{3}initiated_by\0\u{1}location\0\u{3}location_note\0\u{1}satisfaction\0\u{1}notes\0\u{3}quick_log\0\u{1}positions\0")
+
+  fileprivate class _StorageClass {
+    var _at: Int64 = 0
+    var _timeZone: String = String()
+    var _durationMin: Int32 = 0
+    var _foreplayMin: Int32 = 0
+    var _partnerIds: [String] = []
+    var _solo: Bool = false
+    var _types: [String] = []
+    var _protection: [String] = []
+    var _finishedInside: [Calendar_V1_FinishedInside] = []
+    var _orgasmsMe: Int32 = 0
+    var _orgasmsPartner: Int32 = 0
+    var _initiatedBy: String = String()
+    var _location: String = String()
+    var _locationNote: String = String()
+    var _satisfaction: Int32 = 0
+    var _notes: String = String()
+    var _quickLog: Bool = false
+    var _positions: [String] = []
+
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _at = source._at
+      _timeZone = source._timeZone
+      _durationMin = source._durationMin
+      _foreplayMin = source._foreplayMin
+      _partnerIds = source._partnerIds
+      _solo = source._solo
+      _types = source._types
+      _protection = source._protection
+      _finishedInside = source._finishedInside
+      _orgasmsMe = source._orgasmsMe
+      _orgasmsPartner = source._orgasmsPartner
+      _initiatedBy = source._initiatedBy
+      _location = source._location
+      _locationNote = source._locationNote
+      _satisfaction = source._satisfaction
+      _notes = source._notes
+      _quickLog = source._quickLog
+      _positions = source._positions
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularInt64Field(value: &_storage._at) }()
+        case 2: try { try decoder.decodeSingularStringField(value: &_storage._timeZone) }()
+        case 3: try { try decoder.decodeSingularInt32Field(value: &_storage._durationMin) }()
+        case 4: try { try decoder.decodeSingularInt32Field(value: &_storage._foreplayMin) }()
+        case 5: try { try decoder.decodeRepeatedStringField(value: &_storage._partnerIds) }()
+        case 6: try { try decoder.decodeSingularBoolField(value: &_storage._solo) }()
+        case 7: try { try decoder.decodeRepeatedStringField(value: &_storage._types) }()
+        case 8: try { try decoder.decodeRepeatedStringField(value: &_storage._protection) }()
+        case 9: try { try decoder.decodeRepeatedMessageField(value: &_storage._finishedInside) }()
+        case 10: try { try decoder.decodeSingularInt32Field(value: &_storage._orgasmsMe) }()
+        case 11: try { try decoder.decodeSingularInt32Field(value: &_storage._orgasmsPartner) }()
+        case 12: try { try decoder.decodeSingularStringField(value: &_storage._initiatedBy) }()
+        case 13: try { try decoder.decodeSingularStringField(value: &_storage._location) }()
+        case 14: try { try decoder.decodeSingularStringField(value: &_storage._locationNote) }()
+        case 15: try { try decoder.decodeSingularInt32Field(value: &_storage._satisfaction) }()
+        case 16: try { try decoder.decodeSingularStringField(value: &_storage._notes) }()
+        case 17: try { try decoder.decodeSingularBoolField(value: &_storage._quickLog) }()
+        case 18: try { try decoder.decodeRepeatedStringField(value: &_storage._positions) }()
+        default: break
+        }
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      if _storage._at != 0 {
+        try visitor.visitSingularInt64Field(value: _storage._at, fieldNumber: 1)
+      }
+      if !_storage._timeZone.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._timeZone, fieldNumber: 2)
+      }
+      if _storage._durationMin != 0 {
+        try visitor.visitSingularInt32Field(value: _storage._durationMin, fieldNumber: 3)
+      }
+      if _storage._foreplayMin != 0 {
+        try visitor.visitSingularInt32Field(value: _storage._foreplayMin, fieldNumber: 4)
+      }
+      if !_storage._partnerIds.isEmpty {
+        try visitor.visitRepeatedStringField(value: _storage._partnerIds, fieldNumber: 5)
+      }
+      if _storage._solo != false {
+        try visitor.visitSingularBoolField(value: _storage._solo, fieldNumber: 6)
+      }
+      if !_storage._types.isEmpty {
+        try visitor.visitRepeatedStringField(value: _storage._types, fieldNumber: 7)
+      }
+      if !_storage._protection.isEmpty {
+        try visitor.visitRepeatedStringField(value: _storage._protection, fieldNumber: 8)
+      }
+      if !_storage._finishedInside.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._finishedInside, fieldNumber: 9)
+      }
+      if _storage._orgasmsMe != 0 {
+        try visitor.visitSingularInt32Field(value: _storage._orgasmsMe, fieldNumber: 10)
+      }
+      if _storage._orgasmsPartner != 0 {
+        try visitor.visitSingularInt32Field(value: _storage._orgasmsPartner, fieldNumber: 11)
+      }
+      if !_storage._initiatedBy.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._initiatedBy, fieldNumber: 12)
+      }
+      if !_storage._location.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._location, fieldNumber: 13)
+      }
+      if !_storage._locationNote.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._locationNote, fieldNumber: 14)
+      }
+      if _storage._satisfaction != 0 {
+        try visitor.visitSingularInt32Field(value: _storage._satisfaction, fieldNumber: 15)
+      }
+      if !_storage._notes.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._notes, fieldNumber: 16)
+      }
+      if _storage._quickLog != false {
+        try visitor.visitSingularBoolField(value: _storage._quickLog, fieldNumber: 17)
+      }
+      if !_storage._positions.isEmpty {
+        try visitor.visitRepeatedStringField(value: _storage._positions, fieldNumber: 18)
+      }
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Calendar_V1_IntimateContent, rhs: Calendar_V1_IntimateContent) -> Bool {
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._at != rhs_storage._at {return false}
+        if _storage._timeZone != rhs_storage._timeZone {return false}
+        if _storage._durationMin != rhs_storage._durationMin {return false}
+        if _storage._foreplayMin != rhs_storage._foreplayMin {return false}
+        if _storage._partnerIds != rhs_storage._partnerIds {return false}
+        if _storage._solo != rhs_storage._solo {return false}
+        if _storage._types != rhs_storage._types {return false}
+        if _storage._protection != rhs_storage._protection {return false}
+        if _storage._finishedInside != rhs_storage._finishedInside {return false}
+        if _storage._orgasmsMe != rhs_storage._orgasmsMe {return false}
+        if _storage._orgasmsPartner != rhs_storage._orgasmsPartner {return false}
+        if _storage._initiatedBy != rhs_storage._initiatedBy {return false}
+        if _storage._location != rhs_storage._location {return false}
+        if _storage._locationNote != rhs_storage._locationNote {return false}
+        if _storage._satisfaction != rhs_storage._satisfaction {return false}
+        if _storage._notes != rhs_storage._notes {return false}
+        if _storage._quickLog != rhs_storage._quickLog {return false}
+        if _storage._positions != rhs_storage._positions {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Calendar_V1_IntimateEntry: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".IntimateEntry"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}calendar_id\0\u{1}content\0\u{3}created_by\0\u{3}updated_by\0\u{3}created_at\0\u{3}updated_at\0\u{1}rev\0\u{1}deleted\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.calendarID) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._content) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.createdBy) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.updatedBy) }()
+      case 6: try { try decoder.decodeSingularInt64Field(value: &self.createdAt) }()
+      case 7: try { try decoder.decodeSingularInt64Field(value: &self.updatedAt) }()
+      case 8: try { try decoder.decodeSingularInt64Field(value: &self.rev) }()
+      case 9: try { try decoder.decodeSingularBoolField(value: &self.deleted) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.id.isEmpty {
+      try visitor.visitSingularStringField(value: self.id, fieldNumber: 1)
+    }
+    if !self.calendarID.isEmpty {
+      try visitor.visitSingularStringField(value: self.calendarID, fieldNumber: 2)
+    }
+    try { if let v = self._content {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
+    if !self.createdBy.isEmpty {
+      try visitor.visitSingularStringField(value: self.createdBy, fieldNumber: 4)
+    }
+    if !self.updatedBy.isEmpty {
+      try visitor.visitSingularStringField(value: self.updatedBy, fieldNumber: 5)
+    }
+    if self.createdAt != 0 {
+      try visitor.visitSingularInt64Field(value: self.createdAt, fieldNumber: 6)
+    }
+    if self.updatedAt != 0 {
+      try visitor.visitSingularInt64Field(value: self.updatedAt, fieldNumber: 7)
+    }
+    if self.rev != 0 {
+      try visitor.visitSingularInt64Field(value: self.rev, fieldNumber: 8)
+    }
+    if self.deleted != false {
+      try visitor.visitSingularBoolField(value: self.deleted, fieldNumber: 9)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Calendar_V1_IntimateEntry, rhs: Calendar_V1_IntimateEntry) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs.calendarID != rhs.calendarID {return false}
+    if lhs._content != rhs._content {return false}
+    if lhs.createdBy != rhs.createdBy {return false}
+    if lhs.updatedBy != rhs.updatedBy {return false}
+    if lhs.createdAt != rhs.createdAt {return false}
+    if lhs.updatedAt != rhs.updatedAt {return false}
+    if lhs.rev != rhs.rev {return false}
+    if lhs.deleted != rhs.deleted {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Calendar_V1_IntimatePartner: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".IntimatePartner"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}calendar_id\0\u{1}name\0\u{1}color\0\u{1}archived\0\u{1}rev\0\u{1}deleted\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.calendarID) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.name) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.color) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self.archived) }()
+      case 6: try { try decoder.decodeSingularInt64Field(value: &self.rev) }()
+      case 7: try { try decoder.decodeSingularBoolField(value: &self.deleted) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.id.isEmpty {
+      try visitor.visitSingularStringField(value: self.id, fieldNumber: 1)
+    }
+    if !self.calendarID.isEmpty {
+      try visitor.visitSingularStringField(value: self.calendarID, fieldNumber: 2)
+    }
+    if !self.name.isEmpty {
+      try visitor.visitSingularStringField(value: self.name, fieldNumber: 3)
+    }
+    if !self.color.isEmpty {
+      try visitor.visitSingularStringField(value: self.color, fieldNumber: 4)
+    }
+    if self.archived != false {
+      try visitor.visitSingularBoolField(value: self.archived, fieldNumber: 5)
+    }
+    if self.rev != 0 {
+      try visitor.visitSingularInt64Field(value: self.rev, fieldNumber: 6)
+    }
+    if self.deleted != false {
+      try visitor.visitSingularBoolField(value: self.deleted, fieldNumber: 7)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Calendar_V1_IntimatePartner, rhs: Calendar_V1_IntimatePartner) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs.calendarID != rhs.calendarID {return false}
+    if lhs.name != rhs.name {return false}
+    if lhs.color != rhs.color {return false}
+    if lhs.archived != rhs.archived {return false}
+    if lhs.rev != rhs.rev {return false}
+    if lhs.deleted != rhs.deleted {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Calendar_V1_SaveIntimateEntryRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SaveIntimateEntryRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}calendar_id\0\u{3}base_rev\0\u{1}content\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.calendarID) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.baseRev) }()
+      case 4: try { try decoder.decodeSingularMessageField(value: &self._content) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.id.isEmpty {
+      try visitor.visitSingularStringField(value: self.id, fieldNumber: 1)
+    }
+    if !self.calendarID.isEmpty {
+      try visitor.visitSingularStringField(value: self.calendarID, fieldNumber: 2)
+    }
+    if self.baseRev != 0 {
+      try visitor.visitSingularInt64Field(value: self.baseRev, fieldNumber: 3)
+    }
+    try { if let v = self._content {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Calendar_V1_SaveIntimateEntryRequest, rhs: Calendar_V1_SaveIntimateEntryRequest) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs.calendarID != rhs.calendarID {return false}
+    if lhs.baseRev != rhs.baseRev {return false}
+    if lhs._content != rhs._content {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Calendar_V1_SaveIntimateEntryResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SaveIntimateEntryResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}entry\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._entry) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._entry {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Calendar_V1_SaveIntimateEntryResponse, rhs: Calendar_V1_SaveIntimateEntryResponse) -> Bool {
+    if lhs._entry != rhs._entry {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Calendar_V1_DeleteIntimateEntryRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".DeleteIntimateEntryRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}base_rev\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.baseRev) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.id.isEmpty {
+      try visitor.visitSingularStringField(value: self.id, fieldNumber: 1)
+    }
+    if self.baseRev != 0 {
+      try visitor.visitSingularInt64Field(value: self.baseRev, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Calendar_V1_DeleteIntimateEntryRequest, rhs: Calendar_V1_DeleteIntimateEntryRequest) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs.baseRev != rhs.baseRev {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Calendar_V1_DeleteIntimateEntryResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".DeleteIntimateEntryResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}rev\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.rev) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.rev != 0 {
+      try visitor.visitSingularInt64Field(value: self.rev, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Calendar_V1_DeleteIntimateEntryResponse, rhs: Calendar_V1_DeleteIntimateEntryResponse) -> Bool {
+    if lhs.rev != rhs.rev {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Calendar_V1_SaveIntimatePartnerRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SaveIntimatePartnerRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}calendar_id\0\u{1}name\0\u{1}color\0\u{1}archived\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.calendarID) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.name) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.color) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self.archived) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.id.isEmpty {
+      try visitor.visitSingularStringField(value: self.id, fieldNumber: 1)
+    }
+    if !self.calendarID.isEmpty {
+      try visitor.visitSingularStringField(value: self.calendarID, fieldNumber: 2)
+    }
+    if !self.name.isEmpty {
+      try visitor.visitSingularStringField(value: self.name, fieldNumber: 3)
+    }
+    if !self.color.isEmpty {
+      try visitor.visitSingularStringField(value: self.color, fieldNumber: 4)
+    }
+    if self.archived != false {
+      try visitor.visitSingularBoolField(value: self.archived, fieldNumber: 5)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Calendar_V1_SaveIntimatePartnerRequest, rhs: Calendar_V1_SaveIntimatePartnerRequest) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs.calendarID != rhs.calendarID {return false}
+    if lhs.name != rhs.name {return false}
+    if lhs.color != rhs.color {return false}
+    if lhs.archived != rhs.archived {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Calendar_V1_SaveIntimatePartnerResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SaveIntimatePartnerResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}partner\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._partner) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._partner {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Calendar_V1_SaveIntimatePartnerResponse, rhs: Calendar_V1_SaveIntimatePartnerResponse) -> Bool {
+    if lhs._partner != rhs._partner {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
