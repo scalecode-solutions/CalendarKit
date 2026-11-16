@@ -61,10 +61,14 @@ final class IntimacyUITests: XCTestCase {
         link.tap()
         let intimate = app.switches["privacy.intimate"]
         XCTAssert(intimate.waitForExistence(timeout: 5))
-        flip(intimate)
-        waitFor(app.staticTexts["privacy.intimate.state"], label: "On for both")
-        flip(reveal(app.switches["privacy.cycle"]))
-        waitFor(app.staticTexts["privacy.cycle.state"], label: "On for both")
+        // An earlier test in the run may have turned them on already: flip only what's off.
+        let intimateState = app.staticTexts["privacy.intimate.state"]
+        if !intimateState.label.contains("On for both") { flip(intimate) }
+        waitFor(intimateState, label: "On for both")
+        let cycle = reveal(app.switches["privacy.cycle"])
+        let cycleState = app.staticTexts["privacy.cycle.state"]
+        if !cycleState.label.contains("On for both") { flip(cycle) }
+        waitFor(cycleState, label: "On for both")
         for _ in 0..<4 where !app.buttons["addMenu"].exists {
             app.navigationBars.buttons.element(boundBy: 0).tap()
             _ = app.buttons["addMenu"].waitForExistence(timeout: 2)
