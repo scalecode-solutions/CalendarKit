@@ -52,13 +52,21 @@ final class IntimacyUITests: XCTestCase {
 
     /// Our two consents on, through the privacy sheet, then back to the month.
     func consentToBoth() {
-        XCTAssert(app.buttons["Account"].waitForExistence(timeout: 15))
-        app.buttons["Account"].tap()
-        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Shown' OR label CONTAINS 'Hidden'")).firstMatch
-        XCTAssert(row.waitForExistence(timeout: 10), "no pair in the settings")
-        row.tap()
+        // A pair's settings live with the conversation (design review, 2026-11-16):
+        // Chats → the friend → tap the name → Calendar → Privacy.
+        let friend = ProcessInfo.processInfo.environment["CONSENT_FROM"]!.lowercased()
+        app.tabBars.buttons["Chats"].tap()
+        let chat = app.buttons["chat.\(friend)"]
+        XCTAssert(chat.waitForExistence(timeout: 15), "the friend isn't in Chats")
+        chat.tap()
+        let name = app.buttons["conversation.settings"]
+        XCTAssert(name.waitForExistence(timeout: 5), "the name isn't a button")
+        name.tap()
+        let calendar = app.buttons["conversation.settings.calendar"]
+        XCTAssert(calendar.waitForExistence(timeout: 5), "no Calendar in the conversation's settings")
+        calendar.tap()
         let link = app.buttons["pair.privacy"]
-        XCTAssert(link.waitForExistence(timeout: 5), "no Privacy on the pair's page")
+        XCTAssert(link.waitForExistence(timeout: 10), "no Privacy on the pair's page")
         link.tap()
         let intimate = app.switches["privacy.intimate"]
         XCTAssert(intimate.waitForExistence(timeout: 5))
@@ -70,10 +78,12 @@ final class IntimacyUITests: XCTestCase {
         let cycleState = app.staticTexts["privacy.cycle.state"]
         if !cycleState.label.contains("On for both") { flip(cycle) }
         waitFor(cycleState, label: "On for both")
-        for _ in 0..<4 where !app.buttons["addMenu"].exists {
+        // Back to the conversation, then its calendar.
+        for _ in 0..<3 where !app.buttons["conversation.calendar"].exists {
             app.navigationBars.buttons.element(boundBy: 0).tap()
-            _ = app.buttons["addMenu"].waitForExistence(timeout: 2)
+            _ = app.buttons["conversation.calendar"].waitForExistence(timeout: 2)
         }
+        app.buttons["conversation.calendar"].tap()
         XCTAssert(app.buttons["addMenu"].waitForExistence(timeout: 10), "no + menu after both consents")
     }
 

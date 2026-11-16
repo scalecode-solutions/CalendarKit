@@ -12,6 +12,9 @@ public struct PairPrivacySheet: View {
     let engine: CalendarEngine
     let calendarID: UUID
     @State private var showMine = false
+    /// The partner a swipe asked to remove. The dialog hangs off the List, not
+    /// a section header a List can drop once it scrolls away (Frond's review).
+    @State private var removing: CalPartner?
 
     public init(engine: CalendarEngine, calendar: CalCalendar) {
         self.engine = engine
@@ -22,7 +25,7 @@ public struct PairPrivacySheet: View {
         if let c = engine.calendar(calendarID) {
             List {
                 ConsentSection(engine: engine, pair: c, kind: .intimate)
-                if c.intimateOn { PartnersSection(engine: engine, pair: c) }
+                if c.intimateOn { PartnersSection(engine: engine, pair: c, removing: $removing) }
                 ConsentSection(engine: engine, pair: c, kind: .cycle)
                 if c.cycleOn {
                     // Whose cycles this pair tracks: anyone with a logged day or
@@ -49,6 +52,12 @@ public struct PairPrivacySheet: View {
             .calendarAccent(engine.accentColor)
             .navigationTitle("Privacy")
             .navigationBarTitleDisplayMode(.inline)
+            .confirmationDialog("Remove \(removing?.name ?? "")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+                                titleVisibility: .visible, presenting: removing) { p in
+                Button("Remove", role: .destructive) { remove(p, engine) }
+            } message: { _ in
+                Text("It leaves this list and the pickers. Past entries keep the name.")
+            }
         } else {
             ContentUnavailableView("This calendar is gone", systemImage: "calendar.badge.exclamationmark")
         }
@@ -116,7 +125,7 @@ private struct PartnersSection: View {
     let pair: CalCalendar
     @State private var newName = ""
     @State private var newColor: CalColor = .none
-    @State private var removing: CalPartner?
+    @Binding var removing: CalPartner?
 
     var body: some View {
         // Removed partners (archived under the hood) stay on old entries only.
@@ -153,12 +162,6 @@ private struct PartnersSection: View {
             }
         } header: {
             Text("Partners")
-                .confirmationDialog("Remove \(removing?.name ?? "")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
-                                    titleVisibility: .visible, presenting: removing) { p in
-                    Button("Remove", role: .destructive) { remove(p, engine) }
-                } message: { _ in
-                    Text("It leaves this list and the pickers. Past entries keep the name.")
-                }
         } footer: {
             Text("One list for this calendar: you both see it and add to it, and the entry editor picks from it. A color draws the heart in it; without one the heart takes the color of whoever logged it. Removing a name keeps it on past entries.")
         }

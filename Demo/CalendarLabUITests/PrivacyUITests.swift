@@ -45,14 +45,21 @@ final class PrivacyUITests: XCTestCase {
 
     /// The pair's privacy page, from the calendar.
     func openPrivacy() {
-        XCTAssert(app.buttons["Account"].waitForExistence(timeout: 15))
-        app.buttons["Account"].tap()
-        XCTAssert(app.navigationBars["Calendars"].waitForExistence(timeout: 5))
-        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Shown' OR label CONTAINS 'Hidden'")).firstMatch
-        XCTAssert(row.waitForExistence(timeout: 10), "no pair in the settings")
-        row.tap()
+        // A pair's settings live with the conversation (design review, 2026-11-16):
+        // Chats → the friend → tap the name → Calendar → Privacy.
+        let friend = ProcessInfo.processInfo.environment["CONSENT_FROM"]!.lowercased()
+        app.tabBars.buttons["Chats"].tap()
+        let chat = app.buttons["chat.\(friend)"]
+        XCTAssert(chat.waitForExistence(timeout: 15), "the friend isn't in Chats")
+        chat.tap()
+        let name = app.buttons["conversation.settings"]
+        XCTAssert(name.waitForExistence(timeout: 5), "the name isn't a button")
+        name.tap()
+        let calendar = app.buttons["conversation.settings.calendar"]
+        XCTAssert(calendar.waitForExistence(timeout: 5), "no Calendar in the conversation's settings")
+        calendar.tap()
         let link = app.buttons["pair.privacy"]
-        XCTAssert(link.waitForExistence(timeout: 5), "no Privacy on the pair's page")
+        XCTAssert(link.waitForExistence(timeout: 10), "no Privacy on the pair's page")
         link.tap()
         XCTAssert(app.switches["privacy.intimate"].waitForExistence(timeout: 5), "the privacy sheet didn't open")
     }
@@ -87,15 +94,15 @@ final class PrivacyUITests: XCTestCase {
         let renamed = app.buttons["privacy.partner.UI Alex B"].firstMatch
         XCTAssert(renamed.waitForExistence(timeout: 5), "the rename didn't land")
 
-        // Archive, then unarchive, from the swipe.
+        // Remove from the swipe: it asks first (there's no way back), then the
+        // name leaves the list (design review, 2026-11-16: remove, not archive).
         renamed.swipeLeft()
-        app.buttons["Archive"].tap()
-        XCTAssert(renamed.staticTexts["Archived"].waitForExistence(timeout: 5)
-                  || app.staticTexts["Archived"].waitForExistence(timeout: 1), "not archived")
-        shot("p3-archived")
-        renamed.swipeLeft()
-        app.buttons["Unarchive"].tap()
-        XCTAssert(app.staticTexts["Archived"].waitForNonExistence(timeout: 5), "still archived")
+        app.buttons["Remove"].firstMatch.tap()
+        XCTAssert(app.staticTexts["Remove UI Alex B?"].waitForExistence(timeout: 5), "removing didn't ask first")
+        shot("p3-remove-asks")
+        let sheet = app.sheets.buttons["Remove"]
+        (sheet.exists ? sheet : app.buttons["Remove"].firstMatch).tap()
+        XCTAssert(renamed.waitForNonExistence(timeout: 5), "the partner is still listed")
 
         // Cycle: on for both, then my own settings behind "Track my cycle too".
         let cycle = reveal(app.switches["privacy.cycle"])
