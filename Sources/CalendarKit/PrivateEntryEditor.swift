@@ -113,7 +113,7 @@ struct PrivateEntryEditor: View {
         .disabled(readOnly)
         .scrollContentBackground(.hidden)
         .calendarBackdrop(engine)
-        .navigationTitle(existing == nil ? "Intimate" : "Private entry")
+        .navigationTitle("Intimate")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button(readOnly ? "Close" : "Cancel") { dismiss() } }

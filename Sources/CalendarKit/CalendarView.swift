@@ -743,8 +743,10 @@ struct DayCell: View {
                 .background {
                     if let k = marks?.cycle { CycleBand(kind: k, height: min(disc, 44) * 0.8).padding(.horizontal, -1.5) }
                 }
-                .overlay(alignment: .topTrailing) {
-                    if let h = marks?.hearts, !h.isEmpty { HeartMarks(hearts: h, size: min(chipHeight, 18) * 0.62) }
+                .overlay(alignment: .top) {
+                    if let h = marks?.hearts, !h.isEmpty {
+                        HeartMarks(hearts: h, size: min(chipHeight, 18) * 0.8).padding(.horizontal, 1).offset(y: -3)
+                    }
                 }
             // Two lines of chips, always reserved so every week row is the
             // same height: two titles, or one and "+N".

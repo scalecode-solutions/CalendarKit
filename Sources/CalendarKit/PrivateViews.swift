@@ -159,29 +159,46 @@ struct DashedRule: View {
     }
 }
 
-/// A day's hearts in the corner of its cell (plan decisions 6 and 9): one
-/// per author, in the partner's color or the author's, hollow while who is
-/// still unset, with a count when there are several.
+/// A day's hearts in the top corners of its cell (plan decisions 6 and 9):
+/// one per author (the first on the leading side, the second on the
+/// trailing one, clear of the centered number), in the partner's color or
+/// the author's, hollow while who is still unset. A count of more than one
+/// sits inside its heart. Each has a halo in the card's color, so a heart
+/// reads on any cycle band whatever color it is (Torsion's review).
 struct HeartMarks: View {
     let hearts: [CalHeart]
     let size: CGFloat
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 0) {
-            ForEach(hearts.prefix(2)) { h in
-                HStack(spacing: 0) {
-                    Image(systemName: h.hollow ? "heart" : "heart.fill")
-                        .font(.system(size: size, weight: .bold))
-                        .foregroundStyle(CalTint(h.color))
-                    if h.count > 1 {
-                        Text("\(h.count)")
-                            .font(.system(size: size * 0.8, weight: .bold))
-                            .foregroundStyle(CalTint(h.color))
-                    }
-                }
-            }
+        HStack(alignment: .top, spacing: 0) {
+            if let first = hearts.first { HeartMark(heart: first, size: size) }
+            Spacer(minLength: 0)
+            if hearts.count > 1 { HeartMark(heart: hearts[1], size: size) }
         }
         .accessibilityHidden(true)
+    }
+}
+
+struct HeartMark: View {
+    let heart: CalHeart
+    let size: CGFloat
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        ZStack {
+            Image(systemName: "heart.fill")
+                .font(.system(size: size * 1.3, weight: .black))
+                .foregroundStyle(Color(uiColor: .systemBackground).opacity(scheme == .dark ? 0.8 : 1))
+            Image(systemName: heart.hollow ? "heart" : "heart.fill")
+                .font(.system(size: size, weight: .bold))
+                .foregroundStyle(CalTint(heart.color))
+            if heart.count > 1 {
+                Text("\(heart.count)")
+                    .font(.system(size: size * 0.6, weight: .heavy))
+                    .foregroundStyle(heart.hollow ? AnyShapeStyle(CalTint(heart.color)) : AnyShapeStyle(CalOnTint(heart.color)))
+                    .offset(y: -size * 0.05)
+            }
+        }
     }
 }
 
@@ -330,7 +347,7 @@ struct PrivateEntryRow: View {
         var parts: [String] = []
         if c.durationMinutes > 0 { parts.append("\(c.durationMinutes) min") }
         parts.append(contentsOf: c.types.prefix(2).map(PrivateChoices.title))
-        if c.satisfaction > 0 { parts.append(String(repeating: "♥", count: c.satisfaction)) }
+        if c.satisfaction > 0 { parts.append("Satisfaction \(c.satisfaction)/5") }
         if c.quickLog && parts.isEmpty { parts.append("Quick log") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
