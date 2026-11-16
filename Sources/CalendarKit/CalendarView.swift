@@ -1,20 +1,23 @@
 import SwiftUI
 
-/// The calendar: a month grid with each day's events as colored title chips and
-/// the selected day's events below, or an agenda of everything coming up.
-/// Above both, a chip per person whose calendar you see, to show or hide it. The kit
-/// owns its content (the Month/Agenda switch and "+" sit in it); the HOST owns
-/// the navigation bar (title, back, its own buttons) and pushes
-/// `CalendarSettingsView` from wherever it likes (e.g. a trailing gear).
-/// The host starts and stops the engine.
+/// The calendar: a month grid with each day's events as colored title chips, or
+/// an agenda of everything coming up. Tapping a day (or an agenda day header)
+/// pushes that day's view. Above both, a chip per person whose calendar you
+/// see, to show or hide it. The kit owns its content (the Month/Agenda switch
+/// and "+" sit in it); the HOST owns the navigation bar (title, back, its own
+/// buttons) and pushes `CalendarSettingsView` from wherever it likes (e.g. a
+/// trailing gear). The host starts and stops the engine.
+///
+/// **It must sit inside a `NavigationStack`** (the day view is pushed onto it).
+/// Without one, tapping a day does nothing. The Lab's UI tests check it.
 public struct CalendarView: View {
     @Bindable var engine: CalendarEngine
     let appearance: CalendarAppearance
 
-    @State private var selected: CalDate
     @State private var month: (year: Int, month: Int)
     @State private var editor: EditorRequest?
     @State private var detail: CalOccurrence?
+    @State private var openDay: CalDate?
     @AppStorage("CalendarKit.mode") private var mode: CalendarMode = .month
 
     private let zone = TimeZone.current
@@ -24,7 +27,6 @@ public struct CalendarView: View {
         self.engine = engine
         self.appearance = appearance
         let today = CalDate(Date(), in: .current)
-        _selected = State(initialValue: today)
         _month = State(initialValue: (today.year, today.month))
     }
 
@@ -54,29 +56,26 @@ public struct CalendarView: View {
                 case .month: monthContent
                 case .agenda:
                     AgendaList(engine: engine, appearance: appearance, zone: zone,
-                               showOwners: engine.calendars.filter(\.visible).count > 1) { detail = $0 }
+                               showOwners: showOwners, open: { detail = $0 }, openDay: { openDay = $0 })
                 }
             }
             .padding(.top, 4)
         }
         .calendarAccent(engine.accentColor)
-        .sheet(item: $editor) { req in
-            NavigationStack { EventEditorView(engine: engine, request: req) }
-                .calendarAccent(engine.accentColor)
+        .eventSheets(engine: engine, editor: $editor, detail: $detail)
+        .navigationDestination(item: $openDay) { day in
+            DayView(engine: engine, appearance: appearance, zone: zone, day: day,
+                    showOwners: showOwners, occurrences: dayOccurrences)
         }
-        .sheet(item: $detail) { o in
-            NavigationStack {
-                EventDetailView(engine: engine, occurrence: o) { editRequest in
-                    detail = nil
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(350))
-                        editor = editRequest
-                    }
-                }
-            }
-            .calendarAccent(engine.accentColor)
-            .presentationDetents([.medium, .large])
-        }
+    }
+
+    /// Owners are shown on rows when more than one calendar is on screen.
+    private var showOwners: Bool { engine.calendars.filter(\.visible).count > 1 }
+
+    /// One day's occurrences: the same set the grid draws, so anything that
+    /// narrows what's on screen narrows the day view too, in one place.
+    private func dayOccurrences(_ day: CalDate) -> [CalOccurrence] {
+        DayIndex.occurrences(on: day, engine: engine, zone: zone)
     }
 
     /// The kit's own control row: Month / Agenda, and "+".
@@ -89,7 +88,7 @@ public struct CalendarView: View {
             .pickerStyle(.segmented)
             .frame(maxWidth: 220)
             Spacer()
-            Button { editor = .new(mode == .month ? selected : today) } label: {
+            Button { editor = .new(today) } label: {
                 Image(systemName: "plus").font(.body.weight(.semibold)).frame(width: 22, height: 22)
                     .foregroundStyle(CalOnTint(engine.accentColor))
             }
@@ -105,23 +104,29 @@ public struct CalendarView: View {
         .padding(.horizontal, 16)
     }
 
-    @ViewBuilder private var monthContent: some View {
+    /// The month in a scroll view: at large text sizes on a small phone the
+    /// grid is taller than the screen, and pull to refresh lives here.
+    private var monthContent: some View {
         let index = byDay
-        VStack(spacing: 0) {
-            monthHeader
-            weekdayHeader
-            grid(index)
-                .gesture(DragGesture(minimumDistance: 30).onEnded { v in
-                    if v.translation.width < -60 { step(1) } else if v.translation.width > 60 { step(-1) }
-                })
+        return ScrollView {
+            VStack(spacing: 0) {
+                monthHeader
+                weekdayHeader
+                grid(index)
+                    // Simultaneous, and only for a mostly sideways drag, so the
+                    // scroll view still scrolls.
+                    .simultaneousGesture(DragGesture(minimumDistance: 30).onEnded { v in
+                        guard abs(v.translation.width) > abs(v.translation.height) * 1.5 else { return }
+                        if v.translation.width < -60 { step(1) } else if v.translation.width > 60 { step(-1) }
+                    })
+            }
+            .padding(.bottom, 8)
+            .calendarCard(cornerRadius: 28)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 24)
         }
-        .padding(.bottom, 8)
-        .calendarCard(cornerRadius: 28)
-        .padding(.horizontal, 12)
-        // The grid takes the height its chips need; the day's list gets the rest.
-        .fixedSize(horizontal: false, vertical: true)
-        DayList(day: selected, occurrences: index[selected] ?? [], engine: engine, appearance: appearance,
-                showOwners: engine.calendars.filter(\.visible).count > 1) { detail = $0 }
+        .scrollIndicators(.hidden)
+        .refreshable { await engine.refresh() }
     }
 
     // MARK: month
@@ -133,21 +138,15 @@ public struct CalendarView: View {
                 .minimumScaleFactor(0.5)
                 .accessibilityAddTraits(.isHeader)
             Spacer()
-            if layout != MonthLayout(year: today.year, month: today.month, firstWeekday: firstWeekday) || selected != today {
-                Button("Today") {
-                    month = (today.year, today.month)
-                    selected = today
-                }
-                .buttonStyle(.glass)
-                .controlSize(.small)
+            if layout != MonthLayout(year: today.year, month: today.month, firstWeekday: firstWeekday) {
+                Button("Today") { withAnimation(.snappy) { month = (today.year, today.month) } }
+                    .cardButton()
             }
             Button { step(-1) } label: { Image(systemName: "chevron.left").frame(width: 18, height: 18) }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
+                .cardButton(circle: true)
                 .accessibilityLabel("Previous month")
             Button { step(1) } label: { Image(systemName: "chevron.right").frame(width: 18, height: 18) }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
+                .cardButton(circle: true)
                 .accessibilityLabel("Next month")
         }
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
@@ -179,12 +178,13 @@ public struct CalendarView: View {
                 HStack(spacing: 0) {
                     ForEach(week, id: \.self) { day in
                         let occ = index[day] ?? []
-                        DayCell(day: day, inMonth: layout.contains(day), isToday: day == today,
-                                isSelected: day == selected, chips: DayChip.chips(occ), eventCount: occ.count)
-                            .onTapGesture {
-                                selected = day
-                                if !layout.contains(day) { month = (day.year, day.month) }
-                            }
+                        Button { openDay = day } label: {
+                            DayCell(day: day, inMonth: layout.contains(day), isToday: day == today,
+                                    chips: DayChip.chips(occ), eventCount: occ.count)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(DayCell.spoken(day, isToday: day == today, events: occ.count))
+                        .accessibilityHint("Opens the day")
                     }
                 }
             }
@@ -195,7 +195,6 @@ public struct CalendarView: View {
     private func step(_ n: Int) {
         let (y, m) = CalRecurrenceExpander.addMonths(month.year, month.month, n)
         withAnimation(.snappy) { month = (y, m) }
-        selected = CalDate(y, m, 1) == CalDate(today.year, today.month, 1) ? today : CalDate(y, m, 1)
     }
 }
 
@@ -214,6 +213,8 @@ struct AgendaList: View {
     let zone: TimeZone
     let showOwners: Bool
     let open: (CalOccurrence) -> Void
+    /// A day header was tapped: open that day.
+    let openDay: (CalDate) -> Void
     @State private var days = 60
 
     private var today: CalDate { CalDate(Date(), in: zone) }
@@ -259,7 +260,12 @@ struct AgendaList: View {
                                     .buttonStyle(.plain)
                                 }
                             } header: {
-                                AgendaHeader(day: day, today: today).id(day)
+                                Button { openDay(day) } label: { AgendaHeader(day: day, today: today) }
+                                    .buttonStyle(.plain)
+                                    .accessibilityAddTraits(.isHeader)
+                                    .accessibilityHint("Opens the day")
+                                    .accessibilityIdentifier("agendaDayHeader")
+                                    .id(day)
                             }
                         }
                         // Reaching the end loads further ahead (up to two years).
@@ -436,6 +442,14 @@ struct AgendaRow: View {
 
 /// Which days each occurrence shows on (in the viewer's zone).
 enum DayIndex {
+    /// One day's occurrences, everything that touches it (a multi-day or
+    /// all-day event shows on each of its days), in the order the grid uses.
+    @MainActor
+    static func occurrences(on day: CalDate, engine: CalendarEngine, zone: TimeZone) -> [CalOccurrence] {
+        _ = engine.revision
+        return group(engine.occurrences(from: day, through: day, zone: zone), from: day, through: day, zone: zone)[day] ?? []
+    }
+
     static func group(_ occ: [CalOccurrence], from: CalDate, through: CalDate, zone: TimeZone) -> [CalDate: [CalOccurrence]] {
         var out: [CalDate: [CalOccurrence]] = [:]
         for o in occ {
@@ -479,7 +493,6 @@ struct DayCell: View {
     let day: CalDate
     let inMonth: Bool
     let isToday: Bool
-    let isSelected: Bool
     let chips: DayChip.Line
     var eventCount = 0
     @Environment(\.calendarAccent) private var accent
@@ -488,27 +501,23 @@ struct DayCell: View {
     @ScaledMetric(relativeTo: .callout) private var disc: CGFloat = 30
     @ScaledMetric(relativeTo: .caption2) private var chipHeight: CGFloat = 14
 
-    /// Selected today: the accent with black or white on it. Selected another
-    /// day: an inverted disc (dark on light, light on dark).
+    /// Today: the accent with black or white on it. Other days: plain,
+    /// dimmed outside the month.
     private var numberStyle: AnyShapeStyle {
-        switch (isSelected, isToday) {
-        case (true, true): AnyShapeStyle(CalOnTint(accent))
-        case (true, false): AnyShapeStyle(Color(uiColor: .systemBackground))
-        case (false, true): AnyShapeStyle(.tint)
-        case (false, false): inMonth ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary)
-        }
+        if isToday { return AnyShapeStyle(CalOnTint(accent)) }
+        return inMonth ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary)
     }
 
     var body: some View {
         VStack(spacing: 3) {
             Text("\(day.day)")
-                .font(.callout.weight(isToday || isSelected ? .semibold : .regular))
+                .font(.callout.weight(isToday ? .semibold : .regular))
                 .foregroundStyle(numberStyle)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
                 .frame(width: min(disc, 44), height: min(disc, 44))
                 .background {
-                    if isSelected { Circle().fill(isToday ? AnyShapeStyle(.tint) : AnyShapeStyle(Color(uiColor: .label))) }
+                    if isToday { Circle().fill(.tint) }
                 }
             // Two lines of chips, always reserved so every week row is the
             // same height: two titles, or one and "+N".
@@ -533,7 +542,7 @@ struct DayCell: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(DayCell.spoken(day, isToday: isToday, events: eventCount))
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAddTraits(.isButton)
     }
 }
 
@@ -585,92 +594,6 @@ struct DayChip: View {
         let items = occ.map { Item(title: $0.title, color: $0.color) }
         if items.count <= 2 { return Line(shown: items) }
         return Line(shown: [items[0]], more: items.count - 1)
-    }
-}
-
-struct DayList: View {
-    let day: CalDate
-    let occurrences: [CalOccurrence]
-    let engine: CalendarEngine
-    let appearance: CalendarAppearance
-    let showOwners: Bool
-    let open: (CalOccurrence) -> Void
-
-    var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 10) {
-                Text(dayTitle)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .accessibilityAddTraits(.isHeader)
-                if occurrences.isEmpty {
-                    Text(appearance.emptyDay)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                        .calendarCard(cornerRadius: 20)
-                }
-                ForEach(occurrences) { o in
-                    Button { open(o) } label: {
-                        OccurrenceRow(occurrence: o, day: day, engine: engine, showOwner: showOwners)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 12)
-                            .calendarCard(cornerRadius: 20)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 24)
-        }
-        .scrollIndicators(.hidden)
-        .refreshable { await engine.refresh() }
-    }
-
-    private var dayTitle: String {
-        CalFormat.template("EEEEMMMMd").string(from: day.utcMidnight)
-    }
-}
-
-struct OccurrenceRow: View {
-    let occurrence: CalOccurrence
-    let day: CalDate
-    let engine: CalendarEngine
-    let showOwner: Bool
-
-    var body: some View {
-        HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 2).fill(CalTint(occurrence.color)).frame(width: 4)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(occurrence.title).font(.body.weight(.medium)).lineLimit(2)
-                Text(timeText).font(.subheadline).foregroundStyle(.secondary)
-                if !occurrence.event.fields.location.isEmpty {
-                    Text(occurrence.event.fields.location).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-            Spacer(minLength: 8)
-            if occurrence.seriesID != nil {
-                Image(systemName: "repeat").font(.caption).foregroundStyle(.tertiary).accessibilityLabel("Repeats")
-            }
-            if showOwner, let who = AuthorBadge.author(of: occurrence, engine: engine) {
-                who
-            }
-        }
-        .padding(.vertical, 2)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-    }
-
-    private var timeText: String {
-        switch occurrence.when {
-        case .allDay(let s, let e):
-            return s.days(to: e) > 1 ? "All day · day \(s.days(to: day) + 1) of \(s.days(to: e))" : "All day"
-        case .timed(let s, let e, _):
-            let f = CalFormat.styles(date: .none, time: .short)
-            if s == e { return f.string(from: s) }
-            return "\(f.string(from: s)) – \(f.string(from: e))"
-        }
     }
 }
 
@@ -789,6 +712,79 @@ struct NoticeBanner: View {
 }
 
 /// What the editor sheet is for.
+/// The editor and an event's detail, as sheets. The detail's Edit closes the
+/// detail and opens the editor once it has gone, so there's one sheet at a
+/// time. Shared by the calendar and the day view, so each owns its sheets.
+struct EventSheets: ViewModifier {
+    let engine: CalendarEngine
+    @Binding var editor: EditorRequest?
+    @Binding var detail: CalOccurrence?
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: $editor) { req in
+                NavigationStack { EventEditorView(engine: engine, request: req) }
+                    .calendarAccent(engine.accentColor)
+            }
+            .sheet(item: $detail) { o in
+                NavigationStack {
+                    EventDetailView(engine: engine, occurrence: o) { editRequest in
+                        detail = nil
+                        let editor = $editor
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(350))
+                            editor.wrappedValue = editRequest
+                        }
+                    }
+                }
+                .calendarAccent(engine.accentColor)
+                .presentationDetents([.medium, .large])
+            }
+    }
+}
+
+extension View {
+    func eventSheets(engine: CalendarEngine, editor: Binding<EditorRequest?>, detail: Binding<CalOccurrence?>) -> some View {
+        modifier(EventSheets(engine: engine, editor: editor, detail: detail))
+    }
+
+    /// A small button on a glass card (the month arrows, Today). Glass on
+    /// glass renders nearly invisible on iOS 26, so there it's a plain filled
+    /// shape instead; iOS 27 draws the glass button properly.
+    @ViewBuilder func cardButton(circle: Bool = false) -> some View {
+        if #available(iOS 27.0, *) {
+            if circle {
+                buttonStyle(.glass).buttonBorderShape(.circle)
+            } else {
+                buttonStyle(.glass).controlSize(.small)
+            }
+        } else {
+            buttonStyle(FilledCardButtonStyle(circle: circle))
+        }
+    }
+}
+
+/// iOS 26's stand-in for a glass button on a glass card: a filled circle or
+/// capsule in the system's fill color, dimmed while pressed.
+struct FilledCardButtonStyle: ButtonStyle {
+    let circle: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(circle ? .body.weight(.semibold) : .subheadline.weight(.medium))
+            .foregroundStyle(.tint)
+            .padding(circle ? 8 : 0)
+            .padding(.horizontal, circle ? 0 : 12)
+            .padding(.vertical, circle ? 0 : 6)
+            .background {
+                if circle { Circle().fill(Color(uiColor: .tertiarySystemFill)) }
+                else { Capsule().fill(Color(uiColor: .tertiarySystemFill)) }
+            }
+            .opacity(configuration.isPressed ? 0.6 : 1)
+            .contentShape(circle ? AnyShape(Circle()) : AnyShape(Capsule()))
+    }
+}
+
 enum EditorRequest: Identifiable {
     case new(CalDate)
     case event(CalEvent)

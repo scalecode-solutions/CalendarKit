@@ -54,6 +54,25 @@ final class CalendarLabUITests: XCTestCase {
         XCTAssert(segment.isSelected, "\(segment) didn't take")
     }
 
+    /// Tap today in the month: its day view is pushed. That only works with
+    /// a NavigationStack above CalendarView, which the kit requires (0.7.0).
+    func openToday() {
+        let month = app.segmentedControls.buttons["Month"]
+        if month.exists && !month.isSelected { month.tap() }
+        let today = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Today, '")).firstMatch
+        XCTAssert(today.waitForExistence(timeout: 5), "no today cell in the month")
+        today.tap()
+        XCTAssert(app.buttons["Next day"].waitForExistence(timeout: 5), "tapping a day didn't push its day view")
+    }
+
+    /// Back from a pushed screen (the day view) to the calendar.
+    func back() {
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let month = app.segmentedControls.buttons["Month"]
+        for _ in 0..<25 where !(month.exists && month.isHittable) { usleep(200_000) } // up to 5 s
+        XCTAssert(month.exists && month.isHittable, "not back on the calendar")
+    }
+
     func shot(_ name: String) {
         let a = XCTAttachment(screenshot: app.screenshot())
         a.name = name
@@ -76,7 +95,8 @@ final class CalendarLabUITests: XCTestCase {
         shot("2-editor")
         app.navigationBars["New Event"].buttons["Add"].tap()
 
-        // It's in today's list at once (before the server answers).
+        // It's on today at once (before the server answers): open the day.
+        openToday()
         let row = app.buttons.matching(NSPredicate(format: "label CONTAINS 'UI test lunch'")).firstMatch
         XCTAssert(row.waitForExistence(timeout: 5))
         shot("3-added")
@@ -90,6 +110,7 @@ final class CalendarLabUITests: XCTestCase {
         // Delete it (below the fold of the half-height sheet).
         reveal(app.buttons["Delete Event"]).tap()
         XCTAssert(row.waitForNonExistence(timeout: 5))
+        back()
 
         // Calendars sheet, then sharing (loads from the server).
         app.buttons["Account"].tap()
@@ -126,9 +147,17 @@ final class CalendarLabUITests: XCTestCase {
         app.launch()
         XCTAssert(app.staticTexts["Today"].waitForExistence(timeout: 15))
         XCTAssert(row.waitForExistence(timeout: 5))
+        // A day header opens the same day view as the month does.
+        let header = app.buttons["agendaDayHeader"].firstMatch
+        XCTAssert(header.waitForExistence(timeout: 5))
+        header.tap()
+        XCTAssert(app.buttons["Next day"].waitForExistence(timeout: 5), "the day header didn't open the day")
+        XCTAssert(row.waitForExistence(timeout: 5))
+        shot("11-agenda-day")
         row.tap()
         reveal(app.buttons["Delete Event"]).tap()
         XCTAssert(row.waitForNonExistence(timeout: 5))
+        back()
         app.buttons["Month"].tap()
     }
 
@@ -160,6 +189,7 @@ final class CalendarLabUITests: XCTestCase {
         XCTAssert(app.staticTexts["Every day"].waitForExistence(timeout: 3)) // the summary under it
         shot("7-repeat")
         app.navigationBars["New Event"].buttons["Add"].tap()
+        openToday()
         let row = app.buttons.matching(NSPredicate(format: "label CONTAINS 'UI test standup'")).firstMatch
         XCTAssert(row.waitForExistence(timeout: 5))
         row.tap()
@@ -192,6 +222,7 @@ final class CalendarLabUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Reminders"].exists)
         app.navigationBars["New Event"].buttons["Add"].tap()
 
+        openToday()
         let row = app.buttons.matching(NSPredicate(format: "label CONTAINS 'UI test physio'")).firstMatch
         XCTAssert(row.waitForExistence(timeout: 5))
         row.tap()
@@ -203,5 +234,46 @@ final class CalendarLabUITests: XCTestCase {
         XCTAssert(app.buttons["Delete All Future Events"].waitForExistence(timeout: 3))
         app.buttons["Delete All Future Events"].tap()
         XCTAssert(row.waitForNonExistence(timeout: 5))
+    }
+
+    /// MVCALE-32: tapping a day pushes its day view onto the host's
+    /// NavigationStack (the kit requires one), and the chevrons and Today move
+    /// between days. An empty day says so and offers Add.
+    func testTappingADayPushesItsDayViewOntoTheHostsStack() throws {
+        XCTAssert(app.buttons["New Event"].waitForExistence(timeout: 15))
+        shot("d0-month")
+        openToday()
+        XCTAssert(app.navigationBars.buttons.element(boundBy: 0).exists, "no back button: not pushed")
+        let header = app.descendants(matching: .any)["dayViewHeader"].firstMatch
+        func shows(_ word: String) -> Bool {
+            for _ in 0..<15 where !header.label.hasPrefix(word) { usleep(200_000) } // up to 3 s
+            return header.label.hasPrefix(word)
+        }
+        XCTAssert(shows("Today"), header.label)
+        shot("d1-day-today")
+        app.buttons["Next day"].tap()
+        XCTAssert(shows("Tomorrow"), header.label)
+        app.buttons["Previous day"].tap()
+        app.buttons["Previous day"].tap()
+        XCTAssert(shows("Yesterday"), header.label)
+        XCTAssert(app.staticTexts["Nothing planned"].exists)
+        shot("d2-day-empty")
+        app.buttons["Today"].firstMatch.tap()
+        XCTAssert(shows("Today"), header.label)
+        // + in the day view adds to the day shown.
+        app.buttons["Next day"].tap()
+        app.navigationBars.buttons["New Event"].tap()
+        let title = app.textFields["Title"]
+        XCTAssert(title.waitForExistence(timeout: 5))
+        title.tap()
+        title.typeText("UI test tomorrow")
+        app.navigationBars["New Event"].buttons["Add"].tap()
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS 'UI test tomorrow'")).firstMatch
+        XCTAssert(row.waitForExistence(timeout: 5), "the new event isn't on the day shown")
+        shot("d3-day-added")
+        row.tap()
+        reveal(app.buttons["Delete Event"]).tap()
+        XCTAssert(row.waitForNonExistence(timeout: 5))
+        back()
     }
 }
