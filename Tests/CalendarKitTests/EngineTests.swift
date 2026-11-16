@@ -17,6 +17,10 @@ final class FakeServer: CalendarTransport, Sendable {
         var privates: [UUID: CalPrivateEntry] = [:]
         var partners: [UUID: CalPartner] = [:]
         var privateRev: [UUID: Int64] = [:]
+        // The cycle stream, per pair.
+        var cycleDays: [UUID: CalCycleDay] = [:]
+        var cycleSettings: [UUID: CalCycleSettings] = [:] // by CalPairID.make(calendar, person), like the store
+        var cycleRev: [UUID: Int64] = [:]
         var events: [UUID: CalEvent] = [:]
         var labels: [UUID: (CalLabel, deleted: Bool)] = [:]
         var offline = false
@@ -205,10 +209,33 @@ final class FakeServer: CalendarTransport, Sendable {
                     all.append(d)
                 }
             }
+            // The cycle stream: the same shape, under the cycle consent.
+            for c in s.calendars {
+                let held = cursors[c.id]?.cycle ?? 0
+                let cyc: CalCycleDelta
+                if c.cycleOn {
+                    let rev = s.cycleRev[c.id] ?? 0
+                    guard rev > held else { continue }
+                    let ds = s.cycleDays.values.filter { $0.calendarID == c.id && $0.rev > held }
+                    let ss = s.cycleSettings.values.filter { $0.calendarID == c.id && $0.rev > held }
+                    cyc = CalCycleDelta(days: ds, settings: ss, rev: rev, hasMore: false, reset: false)
+                } else if held > 0 {
+                    cyc = CalCycleDelta(days: [], settings: [], rev: 0, hasMore: false, reset: true)
+                } else { continue }
+                if let i = all.firstIndex(where: { $0.calendarID == c.id }) {
+                    all[i].cycleDelta = cyc
+                } else {
+                    let r = cursors[c.id]?.rev ?? 0
+                    var d = CalDelta(calendarID: c.id, events: [], labels: [], deletedLabelIDs: [], rev: r, hasMore: false, reload: false)
+                    d.cycleDelta = cyc
+                    all.append(d)
+                }
+            }
             let gone = cursors.keys.filter { id in !s.calendars.contains { $0.id == id } }
             return CalSyncPage(calendars: s.calendars.map { c in
                 var c = c
                 c.intimateRev = c.intimateOn ? (s.privateRev[c.id] ?? 0) : 0
+                c.cycleRev = c.cycleOn ? (s.cycleRev[c.id] ?? 0) : 0
                 return c
             }, deltas: all, gone: gone)
         }
@@ -416,10 +443,58 @@ final class FakeServer: CalendarTransport, Sendable {
         }
     }
 
-    var cycleDaysSaved: [CalCycleDay] { get { [] } }
-    func saveCycleDay(_ d: CalCycleDay) async throws -> CalCycleDay { throw CalTransportError.notFound }
-    func deleteCycleDay(id: UUID) async throws -> Int64 { throw CalTransportError.notFound }
-    func saveCycleSettings(_ st: CalCycleSettings) async throws -> CalCycleSettings { throw CalTransportError.notFound }
+    /// The other member turns cycle consent on or off.
+    func externalCycleConsent(_ cal: UUID, _ on: Bool) {
+        set { s in if let i = s.calendars.firstIndex(where: { $0.id == cal }) { s.calendars[i].cycleTheirs = on } }
+    }
+
+    /// The real server's cycleAccess: a member writes while both consented
+    /// (else NotFound), for either member only (else InvalidArgument).
+    private func cycleWritable(_ s: State, _ cal: UUID, person: UUID) throws {
+        try writable(s, cal)
+        guard let c = s.calendars.first(where: { $0.id == cal }), c.cycleOn else { throw CalTransportError.notFound }
+        guard person == s.me || person == c.otherID else { throw CalTransportError.invalid("not a member") }
+    }
+
+    func bumpCycle(_ s: inout State, _ cal: UUID) -> Int64 {
+        let r = (s.cycleRev[cal] ?? 0) + 1
+        s.cycleRev[cal] = r
+        return r
+    }
+
+    func saveCycleDay(_ d: CalCycleDay) async throws -> CalCycleDay {
+        try state.withLock { s in
+            try gate(&s, "cycle")
+            try cycleWritable(s, d.calendarID, person: d.personID)
+            var saved = d
+            saved.rev = bumpCycle(&s, d.calendarID)
+            s.cycleDays[d.id] = saved
+            return try answer(&s, saved)
+        }
+    }
+
+    func deleteCycleDay(id: UUID) async throws -> Int64 {
+        try state.withLock { s in
+            try gate(&s, "uncycle")
+            guard var d = s.cycleDays[id], !d.deleted else { throw CalTransportError.notFound }
+            try cycleWritable(s, d.calendarID, person: d.personID)
+            d.deleted = true
+            d.rev = bumpCycle(&s, d.calendarID)
+            s.cycleDays[id] = d
+            return try answer(&s, d.rev)
+        }
+    }
+
+    func saveCycleSettings(_ st: CalCycleSettings) async throws -> CalCycleSettings {
+        try state.withLock { s in
+            try gate(&s, "cycle settings")
+            try cycleWritable(s, st.calendarID, person: st.personID)
+            var saved = st
+            saved.rev = bumpCycle(&s, st.calendarID)
+            s.cycleSettings[CalPairID.make(st.calendarID, st.personID)] = saved
+            return try answer(&s, saved)
+        }
+    }
 
     func savePartner(_ p: CalPartner) async throws -> CalPartner {
         try state.withLock { s in
