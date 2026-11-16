@@ -226,6 +226,10 @@ struct LabConversationView: View {
 struct LabConversationSettings: View {
     let session: LabSession
     let friend: CalContact
+    /// The pair's settings read and write through the engine, so it runs
+    /// while this page (or the pair page pushed over it) is on screen, as on a
+    /// calendar screen (Leaf's review: cold, the page waited forever).
+    @State private var hold = LabCalendarHold()
 
     var body: some View {
         List {
@@ -246,6 +250,7 @@ struct LabConversationSettings: View {
         }
         .navigationTitle(friend.name)
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { hold.arm(session) }
     }
 }
 
