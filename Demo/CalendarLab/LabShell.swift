@@ -106,6 +106,7 @@ struct LabChatsView: View {
                 } label: {
                     Label(friend.name, systemImage: "person.circle")
                 }
+                .accessibilityIdentifier("chat.\(friend.id.uuidString.lowercased())")
             }
             .overlay {
                 if friends.isEmpty {
@@ -156,6 +157,7 @@ struct LabConversationView: View {
                     Image(systemName: "calendar")
                 }
                 .accessibilityLabel("Calendar with \(friend.name)")
+                .accessibilityIdentifier("conversation.calendar")
             }
         }
         .navigationDestination(isPresented: $showCalendar) {
