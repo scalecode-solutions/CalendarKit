@@ -8,7 +8,9 @@ import CalendarKit
 /// - **Chats**: a conversation per friend. A 1:1 conversation's header has a
 ///   calendar button that PUSHES the calendar for the two of you, inside the
 ///   conversation's own navigation stack: backing out lands in the chat, and
-///   the tab never changes.
+///   the tab never changes. Tapping the name opens the conversation's
+///   settings, where the pair calendar's own settings live (labels, activity,
+///   privacy).
 /// - **Settings**: the kit's settings with the Lab's account rows.
 ///
 /// The tab bar floats over the bottom of every screen, as a host's does, so a
@@ -173,6 +175,7 @@ struct LabConversationView: View {
     let session: LabSession
     let friend: CalContact
     @State private var showCalendar = false
+    @State private var showSettings = false
 
     var body: some View {
         ScrollView {
@@ -185,6 +188,17 @@ struct LabConversationView: View {
         .navigationTitle(friend.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            // The name opens the conversation's settings, as a chat host's
+            // header does: everything about the two of you lives there.
+            ToolbarItem(placement: .principal) {
+                Button {
+                    showSettings = true
+                } label: {
+                    Text(friend.name).font(.headline).foregroundStyle(.primary)
+                }
+                .accessibilityLabel("\(friend.name), settings")
+                .accessibilityIdentifier("conversation.settings")
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showCalendar = true
@@ -200,6 +214,38 @@ struct LabConversationView: View {
             // kit's picker hides (MVCALE-36).
             LabCalendarScreen(session: session, title: friend.name, focus: .person(friend.id))
         }
+        .navigationDestination(isPresented: $showSettings) {
+            LabConversationSettings(session: session, friend: friend)
+        }
+    }
+}
+
+/// A stand-in for a chat host's conversation settings (tap the name): the
+/// pair calendar's own settings (labels, activity, privacy) live here, not in
+/// the calendar's personal settings.
+struct LabConversationSettings: View {
+    let session: LabSession
+    let friend: CalContact
+
+    var body: some View {
+        List {
+            Section {
+                LabeledContent("Messages", value: "A host's own rows go here")
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                NavigationLink {
+                    PairSettingsView(engine: session.engine, otherID: friend.id)
+                } label: {
+                    Label("Calendar", systemImage: "calendar")
+                }
+                .accessibilityIdentifier("conversation.settings.calendar")
+            } footer: {
+                Text("Labels, activity and privacy for the calendar you two share.")
+            }
+        }
+        .navigationTitle(friend.name)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

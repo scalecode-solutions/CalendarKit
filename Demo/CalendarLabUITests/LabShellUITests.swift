@@ -55,6 +55,34 @@ final class LabShellUITests: XCTestCase {
         XCTAssert(app.tabBars.buttons["Chats"].isSelected, "the tab changed")
     }
 
+    /// Conversation → tap the name → its settings → Calendar → the pair's own
+    /// settings (Labels · Activity · Privacy), as in a chat host (design review,
+    /// 2026-11-16: a pair's settings live with the conversation, not in the
+    /// calendar's personal settings).
+    func testTheNameOpensSettingsWithThePairCalendar() {
+        let row = app.buttons["chat.\(friend)"]
+        XCTAssert(row.waitForExistence(timeout: 15), "the friend isn't in Chats")
+        row.tap()
+
+        let name = app.buttons["conversation.settings"]
+        XCTAssert(name.waitForExistence(timeout: 5), "the name in the header isn't a button")
+        name.tap()
+        let calendar = app.buttons["conversation.settings.calendar"]
+        XCTAssert(calendar.waitForExistence(timeout: 5), "no Calendar row in the conversation's settings")
+        shot("conversation-settings")
+        calendar.tap()
+
+        for item in ["Labels", "Activity", "Privacy"] {
+            XCTAssert(app.buttons[item].waitForExistence(timeout: 5), "no \(item) in the pair's settings")
+        }
+        shot("pair-settings")
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssert(calendar.waitForExistence(timeout: 5), "back didn't land in the conversation's settings")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssert(name.waitForExistence(timeout: 5), "back didn't land in the conversation")
+    }
+
     /// Home tile → the all-calendars view → back returns to Home.
     func testHomeTileOpensTheCalendar() {
         app.tabBars.buttons["Home"].tap()
