@@ -125,10 +125,15 @@ public struct CalCycleEstimator: Sendable {
     public var periodLength: Int {
         let s = starts
         var lengths: [Int] = []
-        for (i, start) in s.enumerated() {
-            let end = i + 1 < s.count ? s[i + 1] : nil
-            let run = days.filter { d in d.flow.startsAPeriod && d.date >= start && (end.map { d.date < $0 } ?? true) }
-            if let last = run.last { lengths.append(start.days(to: last.date) + 1) }
+        // A period ends at the last bleeding day of its own run (gaps of at
+        // most 3 days); a bleed later in the cycle isn't part of it.
+        let bleeding = days.filter(\.flow.startsAPeriod).map(\.date)
+        for start in s {
+            var last = start
+            for d in bleeding where d > last {
+                if last.days(to: d) <= 3 { last = d } else if d > start { break }
+            }
+            lengths.append(start.days(to: last) + 1)
         }
         let recent = lengths.suffix(6).filter { (1...12).contains($0) }
         if !recent.isEmpty { return Int((Double(recent.reduce(0, +)) / Double(recent.count)).rounded()) }
