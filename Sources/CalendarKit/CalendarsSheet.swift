@@ -182,6 +182,10 @@ struct ActivityView: View {
         case "event_added": return "\(who(a.actorID)) added “\(a.detail)”"
         case "event_changed": return "\(who(a.actorID)) changed “\(a.detail)”"
         case "event_deleted": return "\(who(a.actorID)) deleted “\(a.detail)”"
+        // Plan decision 16: no time, partner or content, ever.
+        case "intimate_added": return "\(who(a.actorID)) added a private entry"
+        case "intimate_changed": return "\(who(a.actorID)) changed a private entry"
+        case "intimate_deleted": return "\(who(a.actorID)) deleted a private entry"
         default: return a.detail
         }
     }
