@@ -47,12 +47,14 @@ struct DevSignIn {
 #endif
 
 /// The dev host: builds a `CalendarEngine` with the Lab's token provider and
-/// drives start/stop/wipe — the same seam a production host uses.
+/// hosts it the way a chat app does (`LabShell`: tabs, conversations, a home
+/// tile). `LabSession` runs the engine while a calendar is on screen and the
+/// app is in the foreground; sign-out wipes it, as a production host does.
 struct CalendarLabHost: View {
     let userID: String
     let server: LabServer
     let signOut: () -> Void
-    @State private var engine: CalendarEngine
+    @State private var session: LabSession
     @Environment(\.scenePhase) private var phase
 
     init(userID: String, server: LabServer, tokenProvider: @escaping @Sendable () async -> String?, signOut: @escaping () -> Void) {
@@ -62,42 +64,14 @@ struct CalendarLabHost: View {
         let config = CalendarConfig(baseURL: server.calendarBaseURL,
                                     currentUserID: UUID(uuidString: userID) ?? UUID(),
                                     tokenProvider: tokenProvider)
-        _engine = State(initialValue: CalendarEngine(config: config))
+        _session = State(initialValue: LabSession(engine: CalendarEngine(config: config)))
     }
 
     var body: some View {
-        // Hosted the way a production host does: the host owns the
-        // bar — a big leading title, and a trailing button pushing the kit's
-        // settings with the host's own section appended.
-        NavigationStack {
-            CalendarView(engine: engine)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Text("Calendar").font(.system(size: 28, weight: .bold)).fixedSize().padding(.horizontal, 8)
-                    }
-                    .sharedBackgroundVisibility(.hidden)
-                    ToolbarItem(placement: .topBarTrailing) {
-                        NavigationLink {
-                            CalendarSettingsView(engine: engine) { account }
-                        } label: {
-                            Image(systemName: "person.crop.circle")
-                        }
-                        .accessibilityLabel("Account")
-                    }
-                }
-        }
-        .task {
-            engine.start()
-        }
-        .onDisappear { engine.stop() }
-        .onChange(of: phase) { _, p in
-            switch p {
-            case .active: engine.start()
-            case .background: engine.stop()
-            default: break
+        LabShell(session: session) { account }
+            .onChange(of: phase, initial: true) { _, p in
+                session.setForeground(p != .background)
             }
-        }
     }
 
     /// CalendarLab's own rows, appended to the kit's settings.
@@ -105,10 +79,10 @@ struct CalendarLabHost: View {
         Section("Account") {
             LabeledContent("User ID") { Text(userID).font(.caption.monospaced()).textSelection(.enabled) }
             LabeledContent("Server", value: server.rawValue)
-            Button("Sync now") { Task { await engine.refresh() } }
+            Button("Sync now") { Task { await session.engine.refresh() } }
             // Sign-out wipes this account's cache and queued writes (production hosts do the same).
             Button("Sign out", role: .destructive) {
-                engine.wipeLocalStore()
+                session.wipe()
                 signOut()
             }
         }
