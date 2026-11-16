@@ -13,7 +13,7 @@ OWNER=${1:?usage: scripts/live-test.sh <owner-uuid> <partner-uuid> (test account
 PARTNER=${2:?usage: scripts/live-test.sh <owner-uuid> <partner-uuid> (test accounts)}
 SERVER=../mvCalendar
 BASE=http://localhost:6100
-SIM=${SIM:-CalendarLab-iPhone}
+SIM=${SIM:-CalendarLab27}
 
 curl -fsS "$BASE/health" >/dev/null || { echo "mvCalendar isn't up at $BASE (cd $SERVER && docker compose up -d)"; exit 2; }
 psql_cal() { docker exec cal-db psql -U cal -d cal -Atc "$1"; }

@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 USER_ID=${1:?usage: scripts/ui-test.sh <test-account-uuid>}
 SERVER=../mvCalendar
-SIM=${SIM:-CalendarLab-iPhone}
+SIM=${SIM:-CalendarLab27}
 DD=${DD:-/tmp/calab-dd}   # build folder: give each resident their own
 ONLY=${ONLY:-}            # one test method, e.g. ONLY=testEditorAndDetailTour
 curl -fsS http://localhost:6100/health >/dev/null || { echo "mvCalendar isn't up"; exit 2; }

@@ -77,7 +77,7 @@ Status: **0.5** (MVCALE-15): engine, sync, offline writes, and the views, runnin
 
 ## Development
 
-- Tests: `xcodebuild test -scheme CalendarKit -destination 'platform=iOS Simulator,name=CalendarLab-iPhone'`.
+- Tests: `xcodebuild test -scheme CalendarKit -destination 'platform=iOS Simulator,name=CalendarLab27'`.
   - **Golden recurrence cases**: `Tests/CalendarKitTests/Resources/recurrence-cases.json`
     is mvCalendar's `testdata/recurrence/cases.json` (answered by
     python-dateutil). Keep it byte-identical: mvCalendar's
