@@ -10,6 +10,7 @@ private let uiLog = Logger(subsystem: "CalendarKit", category: "ui")
 public struct CalendarSettingsView<Extra: View>: View {
     @Bindable var engine: CalendarEngine
     let extra: Extra
+    @AppStorage(CalendarOpensOn.storageKey) private var opensOn: CalendarOpensOn = .lastUsed
 
     public init(engine: CalendarEngine, @ViewBuilder extra: () -> Extra) {
         self.engine = engine
@@ -50,6 +51,13 @@ public struct CalendarSettingsView<Extra: View>: View {
                 } else if let e = engine.lastError {
                     Text(e)
                 }
+            }
+            Section {
+                Picker("Opens on", selection: $opensOn) {
+                    ForEach(CalendarOpensOn.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+            } footer: {
+                Text("Last used opens Month or Agenda, whichever you were on.")
             }
             if let own = engine.ownCalendar {
                 Section("My calendar") {

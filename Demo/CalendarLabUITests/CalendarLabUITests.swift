@@ -276,4 +276,30 @@ final class CalendarLabUITests: XCTestCase {
         XCTAssert(row.waitForNonExistence(timeout: 5))
         back()
     }
+
+    /// MVCALE-32: "Opens on" in the calendar settings. A fixed choice wins
+    /// over the remembered switch; Last used (the default) remembers it.
+    func testOpensOnSetting() throws {
+        XCTAssert(app.buttons["New Event"].waitForExistence(timeout: 15))
+        app.buttons["Account"].tap()
+        XCTAssert(app.navigationBars["Calendars"].waitForExistence(timeout: 5))
+        let picker = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Opens on'")).firstMatch
+        reveal(picker).tap()
+        app.buttons["Agenda"].firstMatch.tap()
+        shot("o1-opens-on")
+        back()
+        // Switch to Month for this visit; a relaunch still opens on Agenda.
+        app.segmentedControls.buttons["Month"].tap()
+        app.terminate()
+        app.launch()
+        XCTAssert(app.buttons["New Event"].waitForExistence(timeout: 15))
+        XCTAssert(app.segmentedControls.buttons["Agenda"].isSelected, "Opens on: Agenda didn't open the agenda")
+        // Back to Last used, leaving the app as other tests expect it.
+        app.buttons["Account"].tap()
+        XCTAssert(app.navigationBars["Calendars"].waitForExistence(timeout: 5))
+        reveal(picker).tap()
+        app.buttons["Last used"].firstMatch.tap()
+        back()
+        app.segmentedControls.buttons["Month"].tap()
+    }
 }

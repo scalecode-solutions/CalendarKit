@@ -2,7 +2,8 @@ import Foundation
 import Testing
 @testable import CalendarKit
 
-/// MVCALE-32: the day view shows what touches its day.
+/// MVCALE-32: the day view shows what touches its day, and "Opens on" picks
+/// the view a fresh calendar screen starts on.
 @MainActor
 @Suite("Day view", .serialized)
 struct DayViewTests {
@@ -33,5 +34,25 @@ struct DayViewTests {
         await engine.refresh()
         #expect(DayIndex.occurrences(on: CalDate(2026, 11, 10), engine: engine, zone: zone).map(\.title) == ["Late"])
         #expect(DayIndex.occurrences(on: CalDate(2026, 11, 11), engine: engine, zone: zone).isEmpty)
+    }
+
+    @Test func opensOnPicksTheStartingView() throws {
+        let d = try #require(UserDefaults(suiteName: "DayViewTests-\(UUID().uuidString)"))
+        // Nothing stored: the month, as before 0.7.0.
+        #expect(CalendarOpensOn.startMode(d) == .month)
+        // Last used (the default) follows the remembered switch.
+        d.set(CalendarMode.agenda.rawValue, forKey: CalendarMode.storageKey)
+        #expect(CalendarOpensOn.startMode(d) == .agenda)
+        d.set(CalendarOpensOn.lastUsed.rawValue, forKey: CalendarOpensOn.storageKey)
+        #expect(CalendarOpensOn.startMode(d) == .agenda)
+        // A fixed choice wins over the remembered one.
+        d.set(CalendarOpensOn.month.rawValue, forKey: CalendarOpensOn.storageKey)
+        #expect(CalendarOpensOn.startMode(d) == .month)
+        d.set(CalendarMode.month.rawValue, forKey: CalendarMode.storageKey)
+        d.set(CalendarOpensOn.agenda.rawValue, forKey: CalendarOpensOn.storageKey)
+        #expect(CalendarOpensOn.startMode(d) == .agenda)
+        // Something unreadable falls back to Last used.
+        d.set("weekly", forKey: CalendarOpensOn.storageKey)
+        #expect(CalendarOpensOn.startMode(d) == .month)
     }
 }

@@ -18,7 +18,11 @@ public struct CalendarView: View {
     @State private var editor: EditorRequest?
     @State private var detail: CalOccurrence?
     @State private var openDay: CalDate?
-    @AppStorage("CalendarKit.mode") private var mode: CalendarMode = .month
+    /// What's on screen this visit; where it starts comes from "Opens on".
+    @State private var mode: CalendarMode
+    /// The last view used, which "Opens on: Last used" reopens.
+    @AppStorage(CalendarMode.storageKey) private var savedMode: CalendarMode = .month
+    @AppStorage(CalendarOpensOn.storageKey) private var opensOn: CalendarOpensOn = .lastUsed
 
     private let zone = TimeZone.current
     private let firstWeekday = Calendar.current.firstWeekday
@@ -28,6 +32,7 @@ public struct CalendarView: View {
         self.appearance = appearance
         let today = CalDate(Date(), in: .current)
         _month = State(initialValue: (today.year, today.month))
+        _mode = State(initialValue: CalendarOpensOn.startMode(.standard))
     }
 
 
@@ -66,6 +71,10 @@ public struct CalendarView: View {
         .navigationDestination(item: $openDay) { day in
             DayView(engine: engine, appearance: appearance, zone: zone, day: day,
                     showOwners: showOwners, occurrences: dayOccurrences)
+        }
+        .onChange(of: mode) { _, m in
+            // Only "Last used" remembers the switch; a fixed choice lasts for the visit.
+            if opensOn == .lastUsed { savedMode = m }
         }
     }
 
@@ -198,9 +207,36 @@ public struct CalendarView: View {
     }
 }
 
-/// The main screen's two views. Remembered on the device.
+/// The main screen's two views. The last one used is remembered on the device.
 public enum CalendarMode: String, Sendable {
     case month, agenda
+
+    static let storageKey = "CalendarKit.mode"
+}
+
+/// Where the calendar opens: the view used last (the default), or always the
+/// month or the agenda. Stored on the device.
+enum CalendarOpensOn: String, CaseIterable, Sendable {
+    case lastUsed, month, agenda
+
+    static let storageKey = "CalendarKit.opensOn"
+
+    var title: String {
+        switch self {
+        case .lastUsed: "Last used"
+        case .month: "Month"
+        case .agenda: "Agenda"
+        }
+    }
+
+    /// The view a fresh calendar screen starts on.
+    static func startMode(_ defaults: UserDefaults) -> CalendarMode {
+        switch CalendarOpensOn(rawValue: defaults.string(forKey: storageKey) ?? "") ?? .lastUsed {
+        case .lastUsed: CalendarMode(rawValue: defaults.string(forKey: CalendarMode.storageKey) ?? "") ?? .month
+        case .month: .month
+        case .agenda: .agenda
+        }
+    }
 }
 
 /// Everything coming up, from today, grouped by day (empty days skipped),
