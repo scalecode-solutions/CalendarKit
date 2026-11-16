@@ -37,13 +37,24 @@ struct CycleEstimatorTests {
         #expect(CalCycleEstimator(days: [day(10, 1, .spotting)], settings: nil).starts.isEmpty)
     }
 
-    /// A bleeding day up to 3 days after the last one continues the period;
-    /// 4 days after starts a new one.
+    /// A bleeding day up to 3 days after the last one continues the period.
     @Test func aShortBreakContinuesAPeriod() {
         #expect(CalCycleEstimator(days: [day(11, 1, .heavy), day(11, 4, .light)], settings: nil).starts == [CalDate(2026, 11, 1)])
-        #expect(CalCycleEstimator(days: [day(11, 1, .heavy), day(11, 5, .light)], settings: nil).starts.count == 2)
         // The continuation counts in the period's length.
         #expect(CalCycleEstimator(days: [day(11, 1, .heavy), day(11, 4, .light)], settings: nil).periodLength == 4)
+    }
+
+    /// Bleeding less than 15 days after a start is mid-cycle (Frond, d630ea1):
+    /// not a start, so it doesn't shorten the cycle, and not part of the
+    /// period, so it doesn't lengthen it.
+    @Test func aMidCycleBleedIsNeitherAStartNorPartOfThePeriod() {
+        let days = period(9, 1, days: 4) + [day(9, 10, .medium)] + period(9, 29, days: 4)
+        let e = CalCycleEstimator(days: days, settings: nil)
+        #expect(e.starts == [CalDate(2026, 9, 1), CalDate(2026, 9, 29)])
+        #expect(e.cycleLength == 28)
+        #expect(e.periodLength == 4)
+        #expect(e.info(on: CalDate(2026, 9, 10)).kind == .logged(.medium))
+        #expect(e.cycleDay(on: CalDate(2026, 9, 10)) == 10)
     }
 
     @Test func lengthsAreTheAveragesOfWhatWasLogged() {
