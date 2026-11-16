@@ -13,6 +13,10 @@ final class FakeServer: CalendarTransport, Sendable {
         /// The caller's friends (ListContacts, and who OpenPair accepts).
         var friends: [CalContact] = []
         var opened: [UUID] = []
+        // The private stream, per pair.
+        var privates: [UUID: CalPrivateEntry] = [:]
+        var partners: [UUID: CalPartner] = [:]
+        var privateRev: [UUID: Int64] = [:]
         var events: [UUID: CalEvent] = [:]
         var labels: [UUID: (CalLabel, deleted: Bool)] = [:]
         var offline = false
@@ -177,8 +181,36 @@ final class FakeServer: CalendarTransport, Sendable {
                                 rev: hi, hasMore: more, reload: reset,
                                 loadFrom: more ? (cur == 0 ? c.rev : loadFrom) : 0)
             }
+            // The private stream: only while both consented; a held cursor
+            // with consent off is told to reset.
+            var all = deltas
+            for c in s.calendars {
+                let held = cursors[c.id]?.intimate ?? 0
+                let priv: CalPrivateDelta
+                if c.intimateOn {
+                    let es = s.privates.values.filter { $0.calendarID == c.id && $0.rev > held }
+                    let ps = s.partners.values.filter { $0.calendarID == c.id && $0.rev > held }
+                    let rev = s.privateRev[c.id] ?? 0
+                    guard rev > held else { continue }
+                    priv = CalPrivateDelta(entries: es, partners: ps, rev: rev, hasMore: false, reset: false)
+                } else if held > 0 {
+                    priv = CalPrivateDelta(entries: [], partners: [], rev: 0, hasMore: false, reset: true)
+                } else { continue }
+                if let i = all.firstIndex(where: { $0.calendarID == c.id }) {
+                    all[i].privateDelta = priv
+                } else {
+                    let r = cursors[c.id]?.rev ?? 0
+                    var d = CalDelta(calendarID: c.id, events: [], labels: [], deletedLabelIDs: [], rev: r, hasMore: false, reload: false)
+                    d.privateDelta = priv
+                    all.append(d)
+                }
+            }
             let gone = cursors.keys.filter { id in !s.calendars.contains { $0.id == id } }
-            return CalSyncPage(calendars: s.calendars, deltas: deltas, gone: gone)
+            return CalSyncPage(calendars: s.calendars.map { c in
+                var c = c
+                c.intimateRev = c.intimateOn ? (s.privateRev[c.id] ?? 0) : 0
+                return c
+            }, deltas: all, gone: gone)
         }
     }
 
@@ -334,11 +366,66 @@ final class FakeServer: CalendarTransport, Sendable {
 
     func listActivity(calendarID: UUID, cursor: String?, limit: Int) async throws -> (rows: [CalActivity], next: String?) { ([], nil) }
 
-    // Private entries: filled in with the engine's private stream (design sprint).
-    func setConsent(calendarID: UUID, kind: CalConsentKind, on: Bool) async throws -> CalCalendar { throw CalTransportError.notFound }
-    func savePrivateEntry(_ e: CalPrivateEntry, baseRev: Int64) async throws -> CalPrivateEntry { throw CalTransportError.notFound }
-    func deletePrivateEntry(id: UUID, baseRev: Int64) async throws -> Int64 { throw CalTransportError.notFound }
-    func savePartner(_ p: CalPartner) async throws -> CalPartner { throw CalTransportError.notFound }
+    // Private entries, as the server: only between members who both consented.
+    func setConsent(calendarID: UUID, kind: CalConsentKind, on: Bool) async throws -> CalCalendar {
+        try state.withLock { s in
+            try gate(&s, "consent")
+            guard let i = s.calendars.firstIndex(where: { $0.id == calendarID }) else { throw CalTransportError.notFound }
+            if kind == .intimate { s.calendars[i].intimateMine = on } else { s.calendars[i].cycleMine = on }
+            return s.calendars[i]
+        }
+    }
+
+    /// The other member turns their consent on or off.
+    func externalConsent(_ cal: UUID, _ on: Bool) {
+        set { s in if let i = s.calendars.firstIndex(where: { $0.id == cal }) { s.calendars[i].intimateTheirs = on } }
+    }
+
+    private func privateWritable(_ s: State, _ cal: UUID) throws {
+        try writable(s, cal)
+        guard s.calendars.first(where: { $0.id == cal })?.intimateOn == true else { throw CalTransportError.notFound }
+    }
+
+    private func bumpPrivate(_ s: inout State, _ cal: UUID) -> Int64 {
+        let r = (s.privateRev[cal] ?? 0) + 1
+        s.privateRev[cal] = r
+        return r
+    }
+
+    func savePrivateEntry(_ e: CalPrivateEntry, baseRev: Int64) async throws -> CalPrivateEntry {
+        try state.withLock { s in
+            try gate(&s, "private")
+            try privateWritable(s, e.calendarID)
+            if let cur = s.privates[e.id], cur.rev != baseRev { throw CalTransportError.conflict(current: nil) }
+            var saved = e
+            saved.rev = bumpPrivate(&s, e.calendarID)
+            s.privates[e.id] = saved
+            return saved
+        }
+    }
+
+    func deletePrivateEntry(id: UUID, baseRev: Int64) async throws -> Int64 {
+        try state.withLock { s in
+            try gate(&s, "unprivate")
+            guard var e = s.privates[id] else { throw CalTransportError.notFound }
+            try privateWritable(s, e.calendarID)
+            e.deleted = true
+            e.rev = bumpPrivate(&s, e.calendarID)
+            s.privates[id] = e
+            return e.rev
+        }
+    }
+
+    func savePartner(_ p: CalPartner) async throws -> CalPartner {
+        try state.withLock { s in
+            try gate(&s, "partner")
+            try privateWritable(s, p.calendarID)
+            var saved = p
+            saved.rev = bumpPrivate(&s, p.calendarID)
+            s.partners[p.id] = saved
+            return saved
+        }
+    }
 }
 
 /// Tests' shorthand for the pair a calendar was in the per-person model.

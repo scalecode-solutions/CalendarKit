@@ -395,6 +395,12 @@ public final class CalendarEngine {
             store.clearForReload(c.id)
         }
         for d in page.deltas {
+            // A delta that only carries the private stream leaves events alone.
+            let heldRev = held[d.calendarID]?.rev ?? 0
+            if !d.reload && d.events.isEmpty && d.labels.isEmpty && d.deletedLabelIDs.isEmpty && d.rev == heldRev {
+                applyPrivate(d.privateDelta, calendarID: d.calendarID, held: held[d.calendarID]?.intimate ?? 0, store: store)
+                continue
+            }
             // Only the first page of a load (or a reload) starts from nothing;
             // later pages of the same load add to it.
             if d.reload || (held[d.calendarID]?.rev ?? 0) == 0 {
@@ -611,6 +617,8 @@ public final class CalendarEngine {
             message = "Someone else changed \(what) first, so your change wasn't saved."
         case .forbidden?:
             message = "You two aren't friends any more, so this calendar can't be changed: \(what) wasn't saved."
+        case .notFound? where isPrivateWrite(w):
+            message = "Intimate entries are on only when you both turn them on, so that wasn't saved."
         case .notFound? where isOpenPair(w):
             message = "You can't keep a calendar with this person right now, so your changes weren't saved."
         case .notFound?:
@@ -642,6 +650,8 @@ public final class CalendarEngine {
         }
         notices.append(CalNotice(message: message))
         switch w {
+        case .savePrivate(let e, let base) where base == 0:
+            store.removePrivate(e.id) // it never existed on the server
         case .create(let e), .exception(let e):
             store.removeEvent(e.id) // it never existed on the server
         default: break
@@ -653,6 +663,13 @@ public final class CalendarEngine {
         // Later writes about the same event were built on this one: drop them too.
         if let id = w.eventID {
             for (pid, other) in store.pending() where other.eventID == id { store.dropPending(pid) }
+        }
+    }
+
+    private func isPrivateWrite(_ w: PendingWrite) -> Bool {
+        switch w {
+        case .savePrivate, .deletePrivate, .savePartner: return true
+        default: return false
         }
     }
 
