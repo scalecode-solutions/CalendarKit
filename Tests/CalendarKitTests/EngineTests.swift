@@ -416,6 +416,11 @@ final class FakeServer: CalendarTransport, Sendable {
         }
     }
 
+    var cycleDaysSaved: [CalCycleDay] { get { [] } }
+    func saveCycleDay(_ d: CalCycleDay) async throws -> CalCycleDay { throw CalTransportError.notFound }
+    func deleteCycleDay(id: UUID) async throws -> Int64 { throw CalTransportError.notFound }
+    func saveCycleSettings(_ st: CalCycleSettings) async throws -> CalCycleSettings { throw CalTransportError.notFound }
+
     func savePartner(_ p: CalPartner) async throws -> CalPartner {
         try state.withLock { s in
             try gate(&s, "partner")

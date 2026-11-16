@@ -71,6 +71,10 @@ public protocol CalendarTransport: Sendable {
     func savePrivateEntry(_ e: CalPrivateEntry, baseRev: Int64) async throws -> CalPrivateEntry
     func deletePrivateEntry(id: UUID, baseRev: Int64) async throws -> Int64
     func savePartner(_ p: CalPartner) async throws -> CalPartner
+    // Cycle (PROVISIONAL).
+    func saveCycleDay(_ d: CalCycleDay) async throws -> CalCycleDay
+    func deleteCycleDay(id: UUID) async throws -> Int64
+    func saveCycleSettings(_ s: CalCycleSettings) async throws -> CalCycleSettings
 }
 
 public extension CalendarTransport {
@@ -139,6 +143,7 @@ public struct ConnectCalendarTransport: CalendarTransport {
             c.rev = cur.rev
             c.loadFrom = cur.loadFrom
             c.intimateRev = cur.intimate
+            c.cycleRev = cur.cycle
             return c
         }
         return try Wire.syncPage(value(await client.sync(request: req, headers: try await headers())))
@@ -258,6 +263,33 @@ public struct ConnectCalendarTransport: CalendarTransport {
         req.color = p.color.rawValue
         req.archived = p.archived
         return try Wire.partner(value(await client.saveIntimatePartner(request: req, headers: try await headers())).partner)
+    }
+
+    // MARK: cycle
+
+    public func saveCycleDay(_ d: CalCycleDay) async throws -> CalCycleDay {
+        var req = Calendar_V1_SaveCycleDayRequest()
+        req.id = Wire.id(d.id)
+        req.calendarID = Wire.id(d.calendarID)
+        req.personID = Wire.id(d.personID)
+        req.date = Wire.day(d.date)
+        req.flow = d.flow.rawValue
+        return try Wire.cycleDay(value(await client.saveCycleDay(request: req, headers: try await headers())).day)
+    }
+
+    public func deleteCycleDay(id: UUID) async throws -> Int64 {
+        var req = Calendar_V1_DeleteCycleDayRequest()
+        req.id = Wire.id(id)
+        return try value(await client.deleteCycleDay(request: req, headers: try await headers())).rev
+    }
+
+    public func saveCycleSettings(_ s: CalCycleSettings) async throws -> CalCycleSettings {
+        var req = Calendar_V1_SaveCycleSettingsRequest()
+        req.calendarID = Wire.id(s.calendarID)
+        req.personID = Wire.id(s.personID)
+        req.cycleLength = Int32(s.cycleLength)
+        req.periodLength = Int32(s.periodLength)
+        return try Wire.cycleSettings(value(await client.saveCycleSettings(request: req, headers: try await headers())).settings)
     }
 
     // MARK: labels and history
@@ -425,7 +457,18 @@ enum Wire {
         c.cycleMine = w.cycleMine
         c.cycleTheirs = w.cycleTheirs
         c.intimateRev = w.intimateRev
+        c.cycleRev = w.cycleRev
         return c
+    }
+
+    static func cycleDay(_ w: Calendar_V1_CycleDay) throws -> CalCycleDay {
+        CalCycleDay(id: try uuid(w.id), calendarID: try uuid(w.calendarID), personID: try uuid(w.personID),
+                    date: day(w.date), flow: CalFlow(rawValue: w.flow) ?? .medium, rev: w.rev, deleted: w.deleted)
+    }
+
+    static func cycleSettings(_ w: Calendar_V1_CycleSettings) throws -> CalCycleSettings {
+        CalCycleSettings(calendarID: try uuid(w.calendarID), personID: try uuid(w.personID),
+                         cycleLength: Int(w.cycleLength), periodLength: Int(w.periodLength), rev: w.rev)
     }
 
     // private entries
@@ -507,7 +550,10 @@ enum Wire {
                          privateDelta: CalPrivateDelta(entries: try d.intimateEntries.map(privateEntry),
                                                        partners: try d.intimatePartners.map(partner),
                                                        rev: d.intimateRev, hasMore: d.intimateHasMore,
-                                                       reset: d.intimateReset))
+                                                       reset: d.intimateReset),
+                         cycleDelta: CalCycleDelta(days: try d.cycleDays.map(cycleDay),
+                                                   settings: try d.cycleSettings.map(cycleSettings),
+                                                   rev: d.cycleRev, hasMore: d.cycleHasMore, reset: d.cycleReset))
             },
             gone: try w.gone.map(uuid))
     }

@@ -356,7 +356,7 @@ public final class CalendarEngine {
                 publish()
                 // More of a calendar (or calendars the server didn't get to):
                 // ask again.
-                if !page.deltas.contains(where: { $0.hasMore || $0.privateDelta.hasMore }) { break }
+                if !page.deltas.contains(where: { $0.hasMore || $0.privateDelta.hasMore || $0.cycleDelta.hasMore }) { break }
             }
             store.lastSync = Date()
             store.save()
@@ -399,6 +399,7 @@ public final class CalendarEngine {
             let heldRev = held[d.calendarID]?.rev ?? 0
             if !d.reload && d.events.isEmpty && d.labels.isEmpty && d.deletedLabelIDs.isEmpty && d.rev == heldRev {
                 applyPrivate(d.privateDelta, calendarID: d.calendarID, held: held[d.calendarID]?.intimate ?? 0, store: store)
+                applyCycle(d.cycleDelta, calendarID: d.calendarID, store: store)
                 continue
             }
             // Only the first page of a load (or a reload) starts from nothing;
@@ -414,6 +415,7 @@ public final class CalendarEngine {
             // (loadFrom ≤ rev, so the server only judges purges more strictly).
             store.setCursor(d.calendarID, d.rev, loadFrom: d.loadFrom)
             applyPrivate(d.privateDelta, calendarID: d.calendarID, held: held[d.calendarID]?.intimate ?? 0, store: store)
+            applyCycle(d.cycleDelta, calendarID: d.calendarID, store: store)
         }
     }
 
@@ -583,12 +585,21 @@ public final class CalendarEngine {
             store.removePrivate(id)
         case .savePartner(let p):
             store.putPartner(try live(try await transport.savePartner(p)))
+        case .saveCycleDay(let d):
+            store.putCycleDay(try live(try await transport.saveCycleDay(d)))
+        case .deleteCycleDay(let id, _):
+            do { _ = try await transport.deleteCycleDay(id: id) } catch CalTransportError.notFound {}
+            _ = try live(())
+            store.removePrivate(id)
+        case .saveCycleSettings(let st):
+            store.putCycleSettings(try live(try await transport.saveCycleSettings(st)))
         case .consent(let id, let kind, let on):
             let c = try live(try await transport.setConsent(calendarID: id, kind: kind, on: on))
             store.updateCalendar(id) { local in
                 var n = c
                 n.autoColor = local.autoColor
                 n.intimateCursor = local.intimateCursor
+                n.cycleCursor = local.cycleCursor
                 local = n
             }
         case .openPair(let other, let id):
@@ -666,9 +677,23 @@ public final class CalendarEngine {
         }
     }
 
+    /// One calendar's cycle changes: a reset drops its cycle rows; else
+    /// tombstones go, the rest is upserted, and the cycle cursor moves on.
+    private func applyCycle(_ d: CalCycleDelta, calendarID: UUID, store: CalendarStore) {
+        if d.reset {
+            store.clearCycle(calendarID)
+            return
+        }
+        for day in d.days {
+            if day.deleted { store.removePrivate(day.id) } else { store.putCycleDay(day) }
+        }
+        for st in d.settings { store.putCycleSettings(st) }
+        if d.rev > 0 { store.setCycleCursor(calendarID, d.rev) }
+    }
+
     private func isPrivateWrite(_ w: PendingWrite) -> Bool {
         switch w {
-        case .savePrivate, .deletePrivate, .savePartner: return true
+        case .savePrivate, .deletePrivate, .savePartner, .saveCycleDay, .deleteCycleDay, .saveCycleSettings: return true
         default: return false
         }
     }
@@ -1023,6 +1048,52 @@ public final class CalendarEngine {
             .filter { on.contains($0.calendarID) && !$0.deleted }
             .filter { let d = $0.day(in: zone); return d >= from && d <= through }
             .sorted { $0.content.at < $1.content.at }
+    }
+
+    // MARK: cycle (0.8.0 design sprint, PROVISIONAL)
+
+    /// Log (or change) a day of someone's cycle on a pair: either member may
+    /// log for either of them.
+    public func logCycleDay(in calendar: CalCalendar, for person: UUID, on day: CalDate, flow: CalFlow) {
+        openStore() // a write before the first refresh must not be lost
+        guard let store else { return }
+        let existing = store.cycleDays().first { $0.calendarID == calendar.id && $0.personID == person && $0.date == day && !$0.deleted }
+        let d = CalCycleDay(id: existing?.id ?? UUID(), calendarID: calendar.id, personID: person, date: day, flow: flow,
+                            rev: existing?.rev ?? 0)
+        store.putCycleDay(d)
+        commit(.saveCycleDay(d))
+    }
+
+    public func removeCycleDay(_ day: CalCycleDay) {
+        openStore() // a write before the first refresh must not be lost
+        store?.removePrivate(day.id)
+        commit(.deleteCycleDay(id: day.id, calendarID: day.calendarID))
+    }
+
+    public func saveCycleSettings(_ settings: CalCycleSettings) {
+        openStore() // a write before the first refresh must not be lost
+        store?.putCycleSettings(settings)
+        commit(.saveCycleSettings(settings))
+    }
+
+    /// Whose cycles a pair tracks: the members with any logged day (or settings).
+    public func cyclePeople(in calendar: CalCalendar) -> [UUID] {
+        _ = revision
+        guard calendar.cycleOn, let store else { return [] }
+        let ids = store.cycleDays().filter { $0.calendarID == calendar.id && !$0.deleted }.map(\.personID)
+            + store.cycleSettings().filter { $0.calendarID == calendar.id }.map(\.personID)
+        var seen: [UUID] = []
+        for id in ids where !seen.contains(id) { seen.append(id) }
+        return seen
+    }
+
+    /// The estimator for one person's cycle on a pair (only while both consented).
+    public func cycle(of person: UUID, in calendar: CalCalendar) -> CalCycleEstimator? {
+        _ = revision
+        guard calendar.cycleOn, let store else { return nil }
+        let days = store.cycleDays().filter { $0.calendarID == calendar.id && $0.personID == person }
+        let settings = store.cycleSettings().first { $0.calendarID == calendar.id && $0.personID == person }
+        return CalCycleEstimator(days: days, settings: settings)
     }
 
     /// A pair's partner list (archived ones last).

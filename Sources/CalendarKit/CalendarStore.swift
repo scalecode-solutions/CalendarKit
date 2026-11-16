@@ -228,6 +228,9 @@ enum PendingWrite: Codable, Equatable, Sendable {
     case deletePrivate(id: UUID, baseRev: Int64, calendarID: UUID)
     case savePartner(CalPartner)
     case consent(calendarID: UUID, kind: CalConsentKind, on: Bool)
+    case saveCycleDay(CalCycleDay)
+    case deleteCycleDay(id: UUID, calendarID: UUID)
+    case saveCycleSettings(CalCycleSettings)
 
     /// A V1 queue row for a reminder write (`alerts` / `alertDefaults`, the
     /// cases removed in MVCALE-15), by its encoded case name.
@@ -259,6 +262,9 @@ enum PendingWrite: Codable, Equatable, Sendable {
         case .savePrivate(let e, _): return e.calendarID
         case .deletePrivate(_, _, let c), .consent(let c, _, _): return c
         case .savePartner(let p): return p.calendarID
+        case .saveCycleDay(let d): return d.calendarID
+        case .deleteCycleDay(_, let c): return c
+        case .saveCycleSettings(let s): return s.calendarID
         }
     }
 }
@@ -345,7 +351,7 @@ final class CalendarStore {
     func cursors() -> [UUID: CalCursor] {
         Dictionary(uniqueKeysWithValues: ((try? context.fetch(FetchDescriptor<CalendarRecord>())) ?? []).compactMap { r in
             guard let c = decode(CalCalendar.self, r.payload), c.listed else { return nil }
-            return (r.id, CalCursor(rev: r.cursor, loadFrom: r.loadFrom, intimate: c.intimateCursor))
+            return (r.id, CalCursor(rev: r.cursor, loadFrom: r.loadFrom, intimate: c.intimateCursor, cycle: c.cycleCursor))
         })
     }
 
@@ -383,6 +389,7 @@ final class CalendarStore {
                 let had = decode(CalCalendar.self, r.payload)
                 c.autoColor = had?.autoColor
                 c.intimateCursor = had?.intimateCursor ?? 0
+                c.cycleCursor = had?.cycleCursor ?? 0
                 r.payload = encode(c)
                 r.position = i
             } else {
@@ -650,9 +657,50 @@ final class CalendarStore {
     /// a calendar, and its private cursor.
     func clearPrivate(_ calendarID: UUID) {
         privateChanges += 1
-        try? context.delete(model: PrivateRecord.self, where: #Predicate { $0.calendarID == calendarID })
+        try? context.delete(model: PrivateRecord.self, where: #Predicate {
+            $0.calendarID == calendarID && ($0.kind == "entry" || $0.kind == "partner")
+        })
         updateCalendar(calendarID) { $0.intimateCursor = 0 }
     }
+
+    // Cycle rows share the private table (kinds "cycle" and "cycleSettings").
+
+    /// A person's settings row id: one per (pair, person).
+    static func settingsID(_ s: CalCycleSettings) -> UUID { CalPairID.make(s.calendarID, s.personID) }
+
+    func putCycleDay(_ d: CalCycleDay) {
+        privateChanges += 1
+        if let r = privateRecord(d.id) { r.payload = encode(d) }
+        else { context.insert(PrivateRecord(id: d.id, calendarID: d.calendarID, kind: "cycle", payload: encode(d), pending: false)) }
+    }
+
+    func putCycleSettings(_ s: CalCycleSettings) {
+        privateChanges += 1
+        let id = Self.settingsID(s)
+        if let r = privateRecord(id) { r.payload = encode(s) }
+        else { context.insert(PrivateRecord(id: id, calendarID: s.calendarID, kind: "cycleSettings", payload: encode(s), pending: false)) }
+    }
+
+    func cycleDays() -> [CalCycleDay] {
+        ((try? context.fetch(FetchDescriptor<PrivateRecord>(predicate: #Predicate { $0.kind == "cycle" }))) ?? [])
+            .compactMap { decode(CalCycleDay.self, $0.payload) }
+    }
+
+    func cycleSettings() -> [CalCycleSettings] {
+        ((try? context.fetch(FetchDescriptor<PrivateRecord>(predicate: #Predicate { $0.kind == "cycleSettings" }))) ?? [])
+            .compactMap { decode(CalCycleSettings.self, $0.payload) }
+    }
+
+    /// Cycle consent is off: drop a calendar's cycle rows and cursor only.
+    func clearCycle(_ calendarID: UUID) {
+        privateChanges += 1
+        try? context.delete(model: PrivateRecord.self, where: #Predicate {
+            $0.calendarID == calendarID && ($0.kind == "cycle" || $0.kind == "cycleSettings")
+        })
+        updateCalendar(calendarID) { $0.cycleCursor = 0 }
+    }
+
+    func setCycleCursor(_ calendarID: UUID, _ rev: Int64) { updateCalendar(calendarID) { $0.cycleCursor = rev } }
 
     func setPrivateCursor(_ calendarID: UUID, _ rev: Int64) {
         updateCalendar(calendarID) { $0.intimateCursor = rev }

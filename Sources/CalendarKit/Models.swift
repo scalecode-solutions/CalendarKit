@@ -104,6 +104,11 @@ public struct CalCalendar: Identifiable, Equatable, Sendable, Codable {
     public var intimateRev: Int64 = 0
     /// Where this device is in the private stream. This device's, never synced.
     public internal(set) var intimateCursor: Int64 = 0
+    /// The server's newest cycle change, and where this device is in it.
+    public var cycleRev: Int64 = 0
+    public internal(set) var cycleCursor: Int64 = 0
+    /// Both members have turned cycle tracking on.
+    public var cycleOn: Bool { cycleMine && cycleTheirs }
     /// Both members have turned intimate entries on.
     public var intimateOn: Bool { intimateMine && intimateTheirs }
 
@@ -130,7 +135,7 @@ public struct CalCalendar: Identifiable, Equatable, Sendable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, otherID, name, rev, frozen, visible, prefColor, listed, autoColor
-        case intimateMine, intimateTheirs, cycleMine, cycleTheirs, intimateRev, intimateCursor
+        case intimateMine, intimateTheirs, cycleMine, cycleTheirs, intimateRev, intimateCursor, cycleRev, cycleCursor
     }
 
     /// Reads 0.7.x's stored payloads too (no consent fields then).
@@ -151,6 +156,8 @@ public struct CalCalendar: Identifiable, Equatable, Sendable, Codable {
         cycleTheirs = try c.decodeIfPresent(Bool.self, forKey: .cycleTheirs) ?? false
         intimateRev = try c.decodeIfPresent(Int64.self, forKey: .intimateRev) ?? 0
         intimateCursor = try c.decodeIfPresent(Int64.self, forKey: .intimateCursor) ?? 0
+        cycleRev = try c.decodeIfPresent(Int64.self, forKey: .cycleRev) ?? 0
+        cycleCursor = try c.decodeIfPresent(Int64.self, forKey: .cycleCursor) ?? 0
     }
 
     /// The color to draw it in for this person: their choice, else the
@@ -411,10 +418,13 @@ public struct CalCursor: Equatable, Sendable {
     public var loadFrom: Int64
     /// The private stream's cursor (0 = none held).
     public var intimate: Int64
-    public init(rev: Int64, loadFrom: Int64 = 0, intimate: Int64 = 0) {
+    /// The cycle stream's cursor (0 = none held).
+    public var cycle: Int64
+    public init(rev: Int64, loadFrom: Int64 = 0, intimate: Int64 = 0, cycle: Int64 = 0) {
         self.rev = rev
         self.loadFrom = loadFrom
         self.intimate = intimate
+        self.cycle = cycle
     }
 }
 
@@ -432,6 +442,8 @@ public struct CalDelta: Equatable, Sendable {
     public var loadFrom: Int64 = 0
     /// The pair's private stream (empty unless both members consented).
     public var privateDelta: CalPrivateDelta = .none
+    /// The pair's cycle stream (empty unless both members consented to cycle).
+    public var cycleDelta: CalCycleDelta = .none
 }
 
 /// One Sync answer.
