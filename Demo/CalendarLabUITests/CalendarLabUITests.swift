@@ -56,6 +56,29 @@ final class CalendarLabUITests: XCTestCase {
         XCTAssert(segment.isSelected, "\(segment) didn't take")
     }
 
+    /// Set the editor's Repeat: a segmented control, or (from extra-extra-large
+    /// text, MVCALE-44) a menu with the same choices.
+    func chooseRepeat(_ choice: String) {
+        let segmented = app.segmentedControls["Repeat"]
+        if segmented.exists {
+            select(segmented.buttons[choice])
+            return
+        }
+        let menu = app.buttons.matching(NSPredicate(format: "identifier == 'Repeat' OR label BEGINSWITH 'Repeat'")).firstMatch
+        reveal(menu).tap()
+        let option = app.buttons[choice].firstMatch
+        XCTAssert(option.waitForExistence(timeout: 3), "no \(choice) in the Repeat menu")
+        option.tap()
+    }
+
+    /// Whether an element lies within the screen's width (nothing pushed off
+    /// the edge; a truncated Text still carries its whole label, so the label
+    /// alone proves nothing).
+    func fitsTheScreen(_ e: XCUIElement) -> Bool {
+        let w = app.windows.firstMatch.frame
+        return e.frame.minX >= w.minX - 0.5 && e.frame.maxX <= w.maxX + 0.5
+    }
+
     /// Tap today in the month: its day view is pushed. That only works with
     /// a NavigationStack above CalendarView, which the kit requires (0.7.0).
     func openToday() {
@@ -246,7 +269,7 @@ final class CalendarLabUITests: XCTestCase {
         title.typeText("UI test standup")
         dismissKeyboard()
         // Repeat is a segmented control: one tap from Never to Daily.
-        select(app.segmentedControls["Repeat"].buttons["Daily"])
+        chooseRepeat("Daily")
         XCTAssert(app.staticTexts["Every day"].waitForExistence(timeout: 3)) // the summary under it
         shot("7-repeat")
         app.navigationBars["New Event"].buttons["Add"].tap()
@@ -275,7 +298,7 @@ final class CalendarLabUITests: XCTestCase {
         app.textFields["Location"].tap()
         app.textFields["Location"].typeText("Riverside Clinic")
         dismissKeyboard()
-        select(app.segmentedControls["Repeat"].buttons["Weekly"])
+        chooseRepeat("Weekly")
         shot("e1-editor-repeat")
         reveal(app.buttons["Calendar's color"])
         shot("e2-editor-color")
@@ -361,6 +384,53 @@ final class CalendarLabUITests: XCTestCase {
         reveal(picker).tap()
         app.buttons["Last used"].firstMatch.tap()
         back()
+        app.segmentedControls.buttons["Month"].tap()
+    }
+
+    /// MVCALE-44: a long title and a long location, whole, in the day view
+    /// and the agenda at whatever text size the sim runs (CalendarLab26: the
+    /// small phone's XXL text and Larger Text zoom).
+    func testLongWordsStayWhole() throws {
+        let longTitle = "Parent teacher conference about the science fair project"
+        let longPlace = "Lincoln Elementary School, Room 214, North Building"
+        XCTAssert(app.buttons["New Event"].waitForExistence(timeout: 15))
+        app.buttons["New Event"].tap()
+        let title = app.textFields["Title"]
+        XCTAssert(title.waitForExistence(timeout: 5))
+        title.tap()
+        title.typeText(longTitle)
+        app.textFields["Location"].tap()
+        app.textFields["Location"].typeText(longPlace)
+        app.navigationBars["New Event"].buttons["Add"].tap()
+
+        openToday()
+        let header = app.descendants(matching: .any)["dayViewHeader"].firstMatch
+        XCTAssert(header.label.contains("Today"), header.label)
+        XCTAssert(fitsTheScreen(header), "the day's header runs off the screen")
+        for b in ["Previous day", "Next day"] {
+            let f = app.buttons[b].frame
+            XCTAssert(f.width >= 43.5 && f.height >= 43.5, "\(b) is \(f.size), under 44 pt")
+            XCTAssert(fitsTheScreen(app.buttons[b]), "\(b) is off the screen")
+        }
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", longTitle)).firstMatch
+        XCTAssert(row.waitForExistence(timeout: 5), "the row doesn't lead with the whole title")
+        XCTAssert(row.label.contains(longPlace), row.label)
+        XCTAssert(fitsTheScreen(row), "the row runs off the screen")
+        shot("s1-day-long")
+        app.buttons["Next day"].tap()
+        XCTAssert(header.label.hasPrefix("Tomorrow"), header.label)
+        XCTAssert(fitsTheScreen(header))
+        shot("s2-day-tomorrow")
+        back()
+
+        app.segmentedControls.buttons["Agenda"].tap()
+        let agendaRow = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", longTitle)).firstMatch
+        XCTAssert(agendaRow.waitForExistence(timeout: 5))
+        XCTAssert(fitsTheScreen(agendaRow))
+        shot("s3-agenda-long")
+        agendaRow.tap()
+        reveal(app.buttons["Delete Event"]).tap()
+        XCTAssert(agendaRow.waitForNonExistence(timeout: 5))
         app.segmentedControls.buttons["Month"].tap()
     }
 }
