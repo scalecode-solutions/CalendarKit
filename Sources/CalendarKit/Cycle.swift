@@ -124,7 +124,7 @@ public struct CalCycleEstimator: Sendable {
         var lengths: [Int] = []
         for (i, start) in s.enumerated() {
             let end = i + 1 < s.count ? s[i + 1] : nil
-            let run = days.filter { $0.flow.startsAPeriod && $0.date >= start && (end.map { $0.date < $1 } ?? true) }
+            let run = days.filter { d in d.flow.startsAPeriod && d.date >= start && (end.map { d.date < $0 } ?? true) }
             if let last = run.last { lengths.append(start.days(to: last.date) + 1) }
         }
         let recent = lengths.suffix(6).filter { (1...12).contains($0) }
