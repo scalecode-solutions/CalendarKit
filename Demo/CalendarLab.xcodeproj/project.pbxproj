@@ -17,6 +17,7 @@
 		A37971E587553D6EBC32C44E /* LabSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FB366C47A9E017B18490CE9 /* LabSession.swift */; };
 		A9DE80DFE32AC2770D63F440 /* CalendarLabApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71C8E0D95013F4403A734B3D /* CalendarLabApp.swift */; };
 		BA3C622527A0EEC879D2370B /* MvAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 1DCC7FBB906F8A0DE2046A85 /* MvAuth */; };
+		BBB51F866D50B746B0E2C7E7 /* IntimacyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 987342D7E4C387D946CEF206 /* IntimacyUITests.swift */; };
 		CD65C6C193A88DE3F7BCD7EB /* CalendarLabUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17F6FBC1FEEE578E5982C66 /* CalendarLabUITests.swift */; };
 		D1E327DA510A3E8CDD915583 /* Lab.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDD1FD445129C48E32647C71 /* Lab.swift */; };
 		E721190CF8E6A68A869C4FD9 /* CalendarKit in Frameworks */ = {isa = PBXBuildFile; productRef = B75656A6064431C3CB1E9F2A /* CalendarKit */; };
@@ -35,11 +36,12 @@
 /* Begin PBXFileReference section */
 		41AD81E82ABD35F4E54B2FD1 /* LabShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabShell.swift; sourceTree = "<group>"; };
 		4D10CC2E28DFB6BE9E47BE4B /* PrivacyUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyUITests.swift; sourceTree = "<group>"; };
-		7D5885610C40DCDC3C83B4F3 /* CalendarKit-torsion-lab */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "CalendarKit-torsion-lab"; path = ..; sourceTree = SOURCE_ROOT; };
 		6908030F3F85F421652123C1 /* CalendarLab.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CalendarLab.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		71C8E0D95013F4403A734B3D /* CalendarLabApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarLabApp.swift; sourceTree = "<group>"; };
 		801490E9F07F8AC9D88693B8 /* IntimacyLookUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntimacyLookUITests.swift; sourceTree = "<group>"; };
+		987342D7E4C387D946CEF206 /* IntimacyUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntimacyUITests.swift; sourceTree = "<group>"; };
 		9FB366C47A9E017B18490CE9 /* LabSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabSession.swift; sourceTree = "<group>"; };
+		AA43378933498FE940347BDD /* CalendarKit-leaf-uitests */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "CalendarKit-leaf-uitests"; path = ..; sourceTree = SOURCE_ROOT; };
 		CDD1FD445129C48E32647C71 /* Lab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Lab.swift; sourceTree = "<group>"; };
 		DB5A2B00CFAED683CBE86B0A /* LabShellUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabShellUITests.swift; sourceTree = "<group>"; };
 		E54166BEE807777644C05EC7 /* CalendarLabUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CalendarLabUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -86,6 +88,7 @@
 			children = (
 				F17F6FBC1FEEE578E5982C66 /* CalendarLabUITests.swift */,
 				801490E9F07F8AC9D88693B8 /* IntimacyLookUITests.swift */,
+				987342D7E4C387D946CEF206 /* IntimacyUITests.swift */,
 				DB5A2B00CFAED683CBE86B0A /* LabShellUITests.swift */,
 				4D10CC2E28DFB6BE9E47BE4B /* PrivacyUITests.swift */,
 			);
@@ -95,7 +98,7 @@
 		E2A5ECBC0483DE626A3A686F /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				7D5885610C40DCDC3C83B4F3 /* CalendarKit-torsion-lab */,
+				AA43378933498FE940347BDD /* CalendarKit-leaf-uitests */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -220,6 +223,7 @@
 			files = (
 				CD65C6C193A88DE3F7BCD7EB /* CalendarLabUITests.swift in Sources */,
 				40761E07CC46D5A105F5307B /* IntimacyLookUITests.swift in Sources */,
+				BBB51F866D50B746B0E2C7E7 /* IntimacyUITests.swift in Sources */,
 				0FD20CB6784DE09DA1C95736 /* LabShellUITests.swift in Sources */,
 				756E3FA0494B93F420680304 /* PrivacyUITests.swift in Sources */,
 			);
