@@ -12,6 +12,8 @@ struct DayView: View {
     let showOwners: Bool
     /// The pair in focus, if one is: new events go there, rows say who added them.
     let inPair: UUID?
+    /// Focused on one person: then + adds only to `inPair`, and with none, nothing.
+    let focused: Bool
     /// The day's occurrences, from the calendar screen, so the day shows
     /// exactly what the grid does.
     let occurrences: (CalDate) -> [CalOccurrence]
@@ -21,12 +23,14 @@ struct DayView: View {
     @State private var detail: CalOccurrence?
 
     init(engine: CalendarEngine, appearance: CalendarAppearance, zone: TimeZone, day: CalDate,
-         showOwners: Bool, inPair: UUID? = nil, occurrences: @escaping (CalDate) -> [CalOccurrence]) {
+         showOwners: Bool, inPair: UUID? = nil, focused: Bool = false,
+         occurrences: @escaping (CalDate) -> [CalOccurrence]) {
         self.engine = engine
         self.appearance = appearance
         self.zone = zone
         self.showOwners = showOwners
         self.inPair = inPair
+        self.focused = focused
         self.occurrences = occurrences
         _day = State(initialValue: day)
     }
@@ -35,8 +39,7 @@ struct DayView: View {
 
     /// Something can be added here: a pair that isn't frozen.
     private var canAdd: Bool {
-        guard let inPair else { return !engine.writableCalendars.isEmpty }
-        return engine.writableCalendars.contains { $0.id == inPair }
+        CalFocus.canAdd(focused: focused, pair: inPair, writable: engine.writableCalendars)
     }
 
     var body: some View {

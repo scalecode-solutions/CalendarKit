@@ -174,6 +174,17 @@ struct PairTests {
         #expect(CalFocus.person(gone).resolved(in: []) == .person(gone))
     }
 
+    /// In a focus, + adds only to that pair: never to another one when the
+    /// focused person has no pair (not a friend), or when theirs is frozen.
+    @Test func plusInAFocusAddsOnlyToThatPair() {
+        let a = CalCalendar(id: UUID(), otherID: UUID()), b = CalCalendar(id: UUID(), otherID: UUID())
+        #expect(CalFocus.canAdd(focused: false, pair: nil, writable: [a, b]))
+        #expect(!CalFocus.canAdd(focused: false, pair: nil, writable: []))
+        #expect(CalFocus.canAdd(focused: true, pair: a.id, writable: [a, b]))
+        #expect(!CalFocus.canAdd(focused: true, pair: nil, writable: [a, b]), "someone with no pair: nothing to add to")
+        #expect(!CalFocus.canAdd(focused: true, pair: a.id, writable: [b]), "their pair is frozen")
+    }
+
     @Test func unlistedPairsSendNoCursor() throws {
         let store = try CalendarStore(userID: UUID(), appGroup: nil, inMemory: true)
         let listed = CalCalendar(id: UUID(), otherID: UUID())

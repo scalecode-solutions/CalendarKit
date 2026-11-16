@@ -55,6 +55,20 @@ public struct CalendarView: View {
         UserDefaults.standard.set(f.stored, forKey: CalFocus.key(engine.config.currentUserID))
     }
 
+    /// Focused on one person (by the host or the picker).
+    private var isFocused: Bool {
+        if case .person = focus { return true }
+        return false
+    }
+
+    /// Focused on someone there's no pair with: not a friend (any more), or
+    /// not loaded yet. Says so once the pairs are in.
+    private var focusedOnNoPair: Bool { isFocused && focusedPair == nil && !engine.calendars.isEmpty }
+
+    /// Whether + can add something here: in a focus, only to that pair, and
+    /// only while it can be written. Never to some other pair.
+    private var canAdd: Bool { CalFocus.canAdd(focused: isFocused, pair: focusedPair?.id, writable: engine.writableCalendars) }
+
     /// The pair in focus, if one is (shown even before the server has it).
     private var focusedPair: CalCalendar? {
         guard case .person(let id) = focus else { return nil }
@@ -95,6 +109,7 @@ public struct CalendarView: View {
                     PeopleBar(engine: engine, focus: focus, choose: choose)
                 }
                 if let p = focusedPair, p.frozen || !p.visible { PairStateBanner(engine: engine, pair: p) }
+                if focusedOnNoPair { NoPairBanner() }
                 switch mode {
                 case .month: monthContent
                 case .agenda:
@@ -108,7 +123,7 @@ public struct CalendarView: View {
         .eventSheets(engine: engine, editor: $editor, detail: $detail)
         .navigationDestination(item: $openDay) { day in
             DayView(engine: engine, appearance: appearance, zone: zone, day: day,
-                    showOwners: showOwners, inPair: focusedPair?.id, occurrences: dayOccurrences)
+                    showOwners: showOwners, inPair: focusedPair?.id, focused: isFocused, occurrences: dayOccurrences)
         }
         .onChange(of: mode) { _, m in
             // Only "Last used" remembers the switch; a fixed choice lasts for the visit.
@@ -143,7 +158,7 @@ public struct CalendarView: View {
             .buttonStyle(.glassProminent)
             .buttonBorderShape(.circle)
             .accessibilityLabel(appearance.newEvent)
-            .disabled(engine.writableCalendars.isEmpty || focusedPair?.frozen == true)
+            .disabled(!canAdd)
             // A fixed-size control: past this, VoiceOver's large content
             // viewer shows it instead of the glyph outgrowing its circle.
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
@@ -733,6 +748,15 @@ public enum CalFocus: Hashable, Sendable {
 
     static func key(_ user: UUID) -> String { "CalendarKit.focus.\(user.uuidString)" }
 
+    /// Whether + can add something: across every pair, if any can be
+    /// written; in a focus, only into that pair while it can be written, and
+    /// with no pair (not a friend), nothing. Never into some other pair.
+    static func canAdd(focused: Bool, pair: UUID?, writable: [CalCalendar]) -> Bool {
+        guard focused else { return !writable.isEmpty }
+        guard let pair else { return false }
+        return writable.contains { $0.id == pair }
+    }
+
     /// The kit's remembered focus, against the pairs there are now: a person
     /// with no pair any more (no longer a friend) is Everyone, rather than an
     /// empty calendar with nothing selected. Nothing loaded yet keeps it; so
@@ -841,6 +865,22 @@ struct FocusChip: View {
         .buttonStyle(.plain)
         .accessibilityLabel(title == "Everyone" ? "Everyone" : "\(title)'s calendar")
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// Over a focus on someone there's no pair with (a conversation with someone
+/// who isn't a friend any more): nothing to show, and nothing can be added.
+struct NoPairBanner: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "calendar.badge.exclamationmark").foregroundStyle(.secondary)
+            Text("You can't keep a calendar with this person right now.")
+                .font(.subheadline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .calendarCard(cornerRadius: 18)
+        .padding(.horizontal, 12)
     }
 }
 
