@@ -196,9 +196,9 @@ struct LabConversationView: View {
             }
         }
         .navigationDestination(isPresented: $showCalendar) {
-            // The pair focus plugs in here once the kit has it (MVCALE-36):
-            // this screen shows the calendar the two of you share.
-            LabCalendarScreen(session: session, title: friend.name)
+            // The two of you's pair calendar: focused on this friend, so the
+            // kit's picker hides (MVCALE-36).
+            LabCalendarScreen(session: session, title: friend.name, focus: .person(friend.id))
         }
     }
 }
@@ -227,10 +227,12 @@ struct LabBubble: View {
 struct LabCalendarScreen: View {
     let session: LabSession
     let title: String
+    /// A conversation's pair; nil for the all-calendars view (the kit's picker).
+    var focus: CalFocus? = nil
     @State private var hold = LabCalendarHold()
 
     var body: some View {
-        CalendarView(engine: session.engine)
+        CalendarView(engine: session.engine, focus: focus.map { .constant($0) })
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -114,21 +114,23 @@ final class CalendarLabUITests: XCTestCase {
         XCTAssert(row.waitForNonExistence(timeout: 5))
         back()
 
-        // Calendars sheet, then sharing (loads from the server).
+        // The settings, the pair it went to, and that pair's history (from
+        // the server): both the add and the delete, by "You".
         app.buttons["Account"].tap()
         XCTAssert(app.navigationBars["Calendars"].waitForExistence(timeout: 5))
         shot("5-calendars")
-        app.buttons["Sharing"].tap()
-        XCTAssert(app.navigationBars["Sharing"].waitForExistence(timeout: 5))
-        sleep(2)
-        shot("6-sharing")
-        app.buttons["Share…"].tap()
-        XCTAssert(app.navigationBars["Share"].waitForExistence(timeout: 5))
-        sleep(1)
-        shot("6b-share-with")
-        // The account's friends in the local graph must be offered.
-        sleep(2)
-        XCTAssertFalse(app.staticTexts["No one else to share with."].exists, "friends not offered")
+        pairRow().tap()
+        app.buttons["Activity"].tap()
+        let added = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'You added “UI test lunch”'")).firstMatch
+        XCTAssert(added.waitForExistence(timeout: 10), "the pair's activity doesn't show the add")
+        shot("6-activity")
+    }
+
+    /// A pair's row in the calendar settings (each says Shown or Hidden).
+    func pairRow() -> XCUIElement {
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Shown' OR label CONTAINS 'Hidden'")).firstMatch
+        XCTAssert(row.waitForExistence(timeout: 10), "no pair in the settings")
+        return row
     }
 
     func testAgendaShowsWhatsComingAndRemembersTheChoice() throws {
@@ -164,18 +166,72 @@ final class CalendarLabUITests: XCTestCase {
     }
 
     /// Read-only: opens the share picker and checks friends are offered.
-    func testSharePickerOffersFriends() throws {
+    /// The settings list a pair for the account's friend (from the contact
+    /// list, before anyone has opened it), with its own show/hide switch.
+    func testSettingsListTheFriendsPair() throws {
         XCTAssert(app.buttons["New Event"].waitForExistence(timeout: 15))
         app.buttons["Account"].tap()
-        app.buttons["Sharing"].tap()
-        XCTAssert(app.navigationBars["Sharing"].waitForExistence(timeout: 5))
-        sleep(3)
-        shot("9-sharing")
-        app.buttons["Share…"].tap()
-        XCTAssert(app.navigationBars["Share"].waitForExistence(timeout: 5))
-        sleep(2)
-        shot("9b-share-with")
-        XCTAssertFalse(app.staticTexts["No one else to share with."].exists, "friends not offered")
+        XCTAssert(app.navigationBars["Calendars"].waitForExistence(timeout: 5))
+        _ = pairRow()
+        XCTAssert(app.switches.firstMatch.exists, "no show/hide switch for the pair")
+        shot("9-pairs")
+    }
+
+    /// MVCALE-36: the focus picker. A person's chip shows just your pair with
+    /// them; hiding the pair takes it off Everyone and into "Hidden (1)", and
+    /// focusing it from there shows it with "Show it again".
+    func testFocusAndHidingAPair() throws {
+        XCTAssert(app.buttons["New Event"].waitForExistence(timeout: 15))
+        app.buttons["New Event"].tap()
+        let title = app.textFields["Title"]
+        XCTAssert(title.waitForExistence(timeout: 5))
+        title.tap()
+        title.typeText("UI test focus")
+        app.navigationBars["New Event"].buttons["Add"].tap()
+        let today = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Today, '")).firstMatch
+        XCTAssert(today.waitForExistence(timeout: 5))
+        func todayHasIt() -> Bool { today.label.contains("1 event") }
+        XCTAssert(todayHasIt(), today.label)
+
+        // Just the friend's pair: still there.
+        let chip = app.buttons.matching(NSPredicate(format: "label ENDSWITH \"'s calendar\"")).firstMatch
+        XCTAssert(chip.waitForExistence(timeout: 10), "no person in the picker")
+        chip.tap()
+        XCTAssert(chip.isSelected)
+        XCTAssert(todayHasIt(), today.label)
+        shot("f1-focused")
+
+        // Hide it in the settings: gone from Everyone, into Hidden (1).
+        app.buttons["Everyone"].tap()
+        app.buttons["Account"].tap()
+        XCTAssert(app.navigationBars["Calendars"].waitForExistence(timeout: 5))
+        app.switches.firstMatch.tap()
+        back()
+        for _ in 0..<15 where todayHasIt() { usleep(200_000) }
+        XCTAssertFalse(todayHasIt(), "a hidden pair still shows in Everyone")
+        let hidden = app.buttons["Hidden calendars, 1"]
+        XCTAssert(hidden.waitForExistence(timeout: 5), "no Hidden (1) in the picker")
+        hidden.tap()
+        // The menu lists the hidden pairs; there's one.
+        let item = app.collectionViews.buttons.firstMatch
+        XCTAssert(item.waitForExistence(timeout: 5), "the hidden menu is empty")
+        item.tap()
+        // Focused from there: it shows, and says it's hidden.
+        XCTAssert(app.staticTexts["You hid this calendar."].waitForExistence(timeout: 5))
+        XCTAssert(todayHasIt(), today.label)
+        shot("f2-hidden-focused")
+        app.buttons["Show it again"].tap()
+        XCTAssert(app.staticTexts["You hid this calendar."].waitForNonExistence(timeout: 5))
+
+        // Clean up: delete it, back to Everyone.
+        openToday()
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS 'UI test focus'")).firstMatch
+        XCTAssert(row.waitForExistence(timeout: 5))
+        row.tap()
+        reveal(app.buttons["Delete Event"]).tap()
+        XCTAssert(row.waitForNonExistence(timeout: 5))
+        back()
+        app.buttons["Everyone"].tap()
     }
 
     func testRepeatingEventAsksWhichOccurrences() throws {
