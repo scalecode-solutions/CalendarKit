@@ -64,10 +64,28 @@ final class LabSession {
     }
 }
 
-extension View {
-    /// Keep the calendar running while this view is on screen. A pushed screen's
-    /// task is cancelled when it's popped, which releases the hold.
-    func holdsCalendar(_ session: LabSession) -> some View {
-        task { await session.run() }
+/// Keeps the calendar running while a screen is anywhere in its navigation
+/// stack, including while the day view or the settings are pushed over it.
+///
+/// A `.task` won't do: a NavigationStack treats a screen covered by a push as
+/// disappeared, which cancelled the hold and stopped syncing whenever the day
+/// view was open (Leaf's review). Held in the screen's `@State` instead: SwiftUI
+/// keeps that storage while the screen is in the stack and frees it when the
+/// screen is popped or the stack is torn down. `arm` runs from `onAppear`, so the
+/// throwaway copies SwiftUI makes of a view's initial state never touch the
+/// session. A production host's screen hold has the same shape.
+@MainActor
+final class LabCalendarHold {
+    private var session: LabSession?
+
+    /// The first call acquires; later ones (reappearing from under a push) do nothing.
+    func arm(_ session: LabSession) {
+        guard self.session == nil else { return }
+        self.session = session
+        session.acquire()
+    }
+
+    isolated deinit {
+        session?.release()
     }
 }

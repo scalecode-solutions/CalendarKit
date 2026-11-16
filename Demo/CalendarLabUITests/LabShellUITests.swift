@@ -84,6 +84,33 @@ final class LabShellUITests: XCTestCase {
         XCTAssert(app.buttons["home.calendar"].waitForExistence(timeout: 5), "back didn't land on Home")
     }
 
+    /// The engine keeps running while the day view (or anything else) is pushed
+    /// over the calendar, stops when the calendar is popped, and runs again
+    /// when it's opened (Leaf's MVCALE-34 review: a `.task` hold dropped it).
+    func testEngineKeepsRunningUnderAPushedDayView() {
+        app.tabBars.buttons["Home"].tap()
+        app.buttons["home.calendar"].tap()
+        assertCalendarShowing()
+        let running = app.otherElements["lab.running"]
+        XCTAssert(running.waitForExistence(timeout: 5), "no running indicator")
+        XCTAssertEqual(running.value as? String, "running", "not running on the calendar")
+
+        let today = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Today, '")).firstMatch
+        XCTAssert(today.waitForExistence(timeout: 5), "no today cell")
+        today.tap()
+        XCTAssert(app.buttons["Next day"].waitForExistence(timeout: 5), "the day view didn't open")
+        sleep(1)
+        XCTAssertEqual(running.value as? String, "running", "the engine stopped under the day view")
+        shot("day-view-running")
+
+        app.navigationBars.buttons.element(boundBy: 0).tap() // day view → calendar
+        assertCalendarShowing()
+        app.navigationBars.buttons.element(boundBy: 0).tap() // calendar → Home
+        XCTAssert(app.buttons["home.calendar"].waitForExistence(timeout: 5))
+        for _ in 0..<20 where running.value as? String != "stopped" { usleep(250_000) }
+        XCTAssertEqual(running.value as? String, "stopped", "still running after the calendar was popped")
+    }
+
     /// Settings carries the kit's settings with the Lab's account rows.
     func testSettingsHasTheAccountRows() {
         app.tabBars.buttons["Settings"].tap()

@@ -33,6 +33,16 @@ struct LabShell<Account: View>: View {
                 }
             }
         }
+        // For the UI tests: whether the engine is running right now. Invisible,
+        // and not hit-testable; VoiceOver users never land on it.
+        .overlay(alignment: .topLeading) {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .allowsHitTesting(false)
+                .accessibilityElement()
+                .accessibilityIdentifier("lab.running")
+                .accessibilityValue(session.isRunning ? "running" : "stopped")
+        }
     }
 }
 
@@ -217,6 +227,7 @@ struct LabBubble: View {
 struct LabCalendarScreen: View {
     let session: LabSession
     let title: String
+    @State private var hold = LabCalendarHold()
 
     var body: some View {
         CalendarView(engine: session.engine)
@@ -234,6 +245,6 @@ struct LabCalendarScreen: View {
                     .accessibilityLabel("Account")
                 }
             }
-            .holdsCalendar(session)
+            .onAppear { hold.arm(session) }
     }
 }
