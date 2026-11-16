@@ -118,7 +118,8 @@ private struct PartnersSection: View {
     @State private var newColor: CalColor = .none
 
     var body: some View {
-        let partners = engine.partners(of: pair)
+        // Removed partners (archived under the hood) stay on old entries only.
+        let partners = engine.partners(of: pair).filter { !$0.archived }
         Section {
             ForEach(partners) { p in
                 NavigationLink {
@@ -126,18 +127,12 @@ private struct PartnersSection: View {
                 } label: {
                     HStack(spacing: 10) {
                         PartnerDot(color: p.color)
-                        Text(p.name).foregroundStyle(p.archived ? .secondary : .primary)
-                        if p.archived { Spacer(); Text("Archived").font(.caption).foregroundStyle(.secondary) }
+                        Text(p.name)
                     }
                 }
                 .swipeActions {
                     if !pair.frozen {
-                        Button(p.archived ? "Unarchive" : "Archive") {
-                            var q = p
-                            q.archived.toggle()
-                            engine.savePartner(q)
-                        }
-                        .tint(p.archived ? .accentColor : .gray)
+                        Button("Remove", role: .destructive) { remove(p, engine) }
                     }
                 }
                 .accessibilityIdentifier("privacy.partner.\(p.name)")
@@ -157,7 +152,7 @@ private struct PartnersSection: View {
         } header: {
             Text("Partners")
         } footer: {
-            Text("One list for this calendar: you both see it and add to it. A color draws the heart in it; without one the heart takes the color of whoever logged it. Archived names stay on old entries and leave the pickers.")
+            Text("One list for this calendar: you both see it and add to it, and the entry editor picks from it. A color draws the heart in it; without one the heart takes the color of whoever logged it. Removing a name keeps it on past entries.")
         }
     }
 
@@ -171,9 +166,19 @@ private struct PartnersSection: View {
     }
 }
 
+/// Remove a partner: gone from settings and the pickers, still named on past
+/// entries (archived on the server; there's no way back, by design).
+@MainActor
+private func remove(_ p: CalPartner, _ engine: CalendarEngine) {
+    var q = p
+    q.archived = true
+    engine.savePartner(q)
+}
+
 private struct PartnerEditor: View {
     let engine: CalendarEngine
     @State var partner: CalPartner
+    @State private var confirmRemove = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -185,7 +190,21 @@ private struct PartnerEditor: View {
                     Text(c == .none ? "Whoever logged it" : c.title).tag(c)
                 }
             }
-            Toggle("Archived", isOn: $partner.archived)
+            if engine.calendar(partner.calendarID)?.frozen == false {
+                Section {
+                    Button("Remove", role: .destructive) { confirmRemove = true }
+                        .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier("privacy.partner.edit.remove")
+                } footer: {
+                    Text("It leaves this list and the pickers. Past entries keep the name.")
+                }
+            }
+        }
+        .confirmationDialog("Remove \(partner.name)?", isPresented: $confirmRemove, titleVisibility: .visible) {
+            Button("Remove", role: .destructive) {
+                remove(partner, engine)
+                dismiss()
+            }
         }
         .navigationTitle("Partner")
         .navigationBarTitleDisplayMode(.inline)

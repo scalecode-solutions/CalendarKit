@@ -36,17 +36,17 @@ public struct CalendarSettingsView<Extra: View>: View {
                 }
                 ForEach(engine.calendars) { c in
                     HStack(spacing: 10) {
-                        NavigationLink {
-                            PairSettings(engine: engine, pairID: c.id).calendarAccent(engine.accentColor)
-                        } label: {
-                            HStack(spacing: 10) {
-                                CalAvatar(contact: engine.person(of: c), fallbackName: engine.displayName(c), tint: c.displayColor, size: 28)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(engine.displayName(c))
-                                    Text(stateText(c)).font(.caption).foregroundStyle(.secondary)
-                                }
+                        // A pair's own settings (labels, activity, privacy) live
+                        // with the conversation in the host: PairSettingsView.
+                        HStack(spacing: 10) {
+                            CalAvatar(contact: engine.person(of: c), fallbackName: engine.displayName(c), tint: c.displayColor, size: 28)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(engine.displayName(c))
+                                Text(stateText(c)).font(.caption).foregroundStyle(.secondary)
                             }
+                            Spacer(minLength: 0)
                         }
+                        .accessibilityElement(children: .combine)
                         Menu {
                             Picker("Color", selection: Binding(get: { c.prefColor }, set: { engine.setColor(c, $0) })) {
                                 ForEach(CalColor.allCases, id: \.self) { col in
@@ -70,7 +70,7 @@ public struct CalendarSettingsView<Extra: View>: View {
                 } else if let e = engine.lastError {
                     Text(e)
                 } else {
-                    Text("Each is yours and one friend's, and either of you can change anything on it. Hiding one is only on your screens.")
+                    Text("Each is yours and one friend's, and either of you can change anything on it. Hiding one is only on your screens. Its labels, history and privacy are with your conversation.")
                 }
             }
             extra
@@ -87,25 +87,50 @@ public struct CalendarSettingsView<Extra: View>: View {
     }
 }
 
-/// One pair: its labels and its history.
-struct PairSettings: View {
+/// One pair's settings: its labels, its history and its privacy. A host
+/// pushes it from the conversation with that person (its settings page,
+/// beside search), not from the calendar: these are the two people's things,
+/// while CalendarSettingsView holds only the person's own (their color, where
+/// it opens, which pairs show). The host keeps the engine running while it's
+/// on screen, as for the calendar.
+public struct PairSettingsView: View {
     let engine: CalendarEngine
-    let pairID: UUID
+    let otherID: UUID
 
-    var body: some View {
-        if let c = engine.calendar(pairID) {
-            List {
-                Section {
-                    NavigationLink("Labels") { LabelsView(engine: engine, pairID: pairID).calendarAccent(engine.accentColor) }
-                    NavigationLink("Activity") { ActivityView(engine: engine, pair: c).calendarAccent(engine.accentColor) }
-                    NavigationLink("Privacy") { PairPrivacySheet(engine: engine, calendar: c) }
-                        .accessibilityIdentifier("pair.privacy")
+    public init(engine: CalendarEngine, otherID: UUID) {
+        self.engine = engine
+        self.otherID = otherID
+    }
+
+    public var body: some View {
+        Group {
+            // A friend with no pair on the server yet is listed too (synthesized):
+            // its first label or consent opens the pair.
+            if let c = engine.calendars.first(where: { $0.otherID == otherID }) {
+                List {
+                    Section {
+                        NavigationLink("Labels") { LabelsView(engine: engine, pairID: c.id).calendarAccent(engine.accentColor) }
+                            .accessibilityIdentifier("pair.labels")
+                        NavigationLink("Activity") { ActivityView(engine: engine, pair: c).calendarAccent(engine.accentColor) }
+                            .accessibilityIdentifier("pair.activity")
+                        NavigationLink("Privacy") { PairPrivacySheet(engine: engine, calendar: c) }
+                            .accessibilityIdentifier("pair.privacy")
+                    } footer: {
+                        Text(c.frozen ? "You aren't friends now, so this calendar is read-only."
+                                      : "These belong to your calendar with \(engine.displayName(c)): you both see and change them.")
+                    }
                 }
+                .calendarBackdrop(engine)
+            } else if engine.loadState == .idle || engine.loadState == .loading {
+                ProgressView()
+            } else {
+                ContentUnavailableView("No calendar together", systemImage: "calendar",
+                                       description: Text("A calendar with someone starts once you're friends."))
             }
-            .calendarBackdrop(engine)
-            .navigationTitle(engine.displayName(c))
-            .navigationBarTitleDisplayMode(.inline)
         }
+        .calendarAccent(engine.accentColor)
+        .navigationTitle("Calendar")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
