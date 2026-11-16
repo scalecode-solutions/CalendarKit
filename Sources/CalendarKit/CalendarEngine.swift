@@ -663,6 +663,14 @@ public final class CalendarEngine {
         switch w {
         case .savePrivate(let e, let base) where base == 0:
             store.removePrivate(e.id) // it never existed on the server
+        case .savePrivate(let e, _):
+            // Refused for good (someone changed it first): stop holding the
+            // local version and reload the pair's private stream, so the
+            // server's copy lands (Leaf's test, PrivateDataTests).
+            if let local = store.privateEntry(e.id) { store.putPrivate(local, pending: false) }
+            store.setPrivateCursor(e.calendarID, 0)
+        case .deletePrivate(_, _, let cal):
+            store.setPrivateCursor(cal, 0)
         case .create(let e), .exception(let e):
             store.removeEvent(e.id) // it never existed on the server
         default: break
