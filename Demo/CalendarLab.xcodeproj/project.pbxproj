@@ -41,7 +41,7 @@
 		801490E9F07F8AC9D88693B8 /* IntimacyLookUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntimacyLookUITests.swift; sourceTree = "<group>"; };
 		987342D7E4C387D946CEF206 /* IntimacyUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntimacyUITests.swift; sourceTree = "<group>"; };
 		9FB366C47A9E017B18490CE9 /* LabSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabSession.swift; sourceTree = "<group>"; };
-		AA43378933498FE940347BDD /* CalendarKit-leaf-uitests */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "CalendarKit-leaf-uitests"; path = ..; sourceTree = SOURCE_ROOT; };
+		7D5885610C40DCDC3C83B4F3 /* CalendarKit-torsion-lab */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "CalendarKit-torsion-lab"; path = ..; sourceTree = SOURCE_ROOT; };
 		CDD1FD445129C48E32647C71 /* Lab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Lab.swift; sourceTree = "<group>"; };
 		DB5A2B00CFAED683CBE86B0A /* LabShellUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabShellUITests.swift; sourceTree = "<group>"; };
 		E54166BEE807777644C05EC7 /* CalendarLabUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CalendarLabUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -98,7 +98,7 @@
 		E2A5ECBC0483DE626A3A686F /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				AA43378933498FE940347BDD /* CalendarKit-leaf-uitests */,
+				7D5885610C40DCDC3C83B4F3 /* CalendarKit-torsion-lab */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
