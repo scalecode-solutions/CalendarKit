@@ -14,7 +14,9 @@ final class CalendarLabUITests: XCTestCase {
         }
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchEnvironment = ["CAL_DEV_TOKEN": token, "CAL_DEV_USER": user]
+        // The Lab opens on Chats like a chat host; LAB_START=calendar opens it
+        // straight on the calendar (Home → Calendar), where these tests begin.
+        app.launchEnvironment = ["CAL_DEV_TOKEN": token, "CAL_DEV_USER": user, "LAB_START": "calendar"]
         app.launch()
     }
 

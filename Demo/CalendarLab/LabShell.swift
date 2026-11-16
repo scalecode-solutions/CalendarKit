@@ -222,6 +222,18 @@ struct LabCalendarScreen: View {
         CalendarView(engine: session.engine)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                // The calendar's settings, pushed from its own screen as a
+                // host's gear does (the kit's UI tests reach them here).
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        CalendarSettingsView(engine: session.engine) { EmptyView() }
+                    } label: {
+                        Image(systemName: "person.crop.circle")
+                    }
+                    .accessibilityLabel("Account")
+                }
+            }
             .holdsCalendar(session)
     }
 }
