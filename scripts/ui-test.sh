@@ -10,7 +10,8 @@ SIM_ID=$(xcrun simctl list devices available | sed -nE "s/^ +$SIM \(([0-9A-F-]{3
 [ -n "$SIM_ID" ] || { echo "no simulator named $SIM"; exit 2; }
 DD=${DD:-/tmp/calab-dd}   # build folder: give each resident their own
 ONLY=${ONLY:-}            # one test method, e.g. ONLY=testEditorAndDetailTour (or Class/method)
-[[ -n "$ONLY" && "$ONLY" != */* ]] && ONLY=CalendarLabUITests/$ONLY
+# A bare method name is one of CalendarLabUITests'; a capitalized bare name is a class.
+[[ -n "$ONLY" && "$ONLY" != */* && "$ONLY" != [A-Z]* ]] && ONLY=CalendarLabUITests/$ONLY
 BASE=${BASE:-http://localhost:6100}   # a throwaway server: BASE=http://localhost:6101 CAL_DB=<its container>
 curl -fsS "$BASE/health" >/dev/null || { echo "mvCalendar isn't up"; exit 2; }
 psql_cal() { docker exec "${CAL_DB:-cal-db}" psql -U cal -d cal -Atc "$1"; }
@@ -46,5 +47,9 @@ TEST_RUNNER_CAL_DEV_TOKEN=$TOKEN TEST_RUNNER_CAL_DEV_USER=$USER_ID TEST_RUNNER_C
   xcodebuild test -project CalendarLab.xcodeproj -scheme CalendarLab \
     -destination "platform=iOS Simulator,id=$SIM_ID" -derivedDataPath "$DD" \
     -resultBundlePath "$RESULT" ${ONLY:+-only-testing:CalendarLabUITests/$ONLY} 2>&1 | grep -E "Test Case .*(passed|failed)|error:|\*\* TEST" || true
+# Nothing ran (a misspelt ONLY) is a failure, not a pass (Leaf's catch).
+RAN=$(xcrun xcresulttool get test-results summary --path "$RESULT" 2>/dev/null | python3 -c "import json,sys;d=json.load(sys.stdin);print(d.get('passedTests',0)+d.get('failedTests',0))" 2>/dev/null || echo 0)
+[ "$RAN" != "0" ] || { echo "no tests ran: check ONLY ($ONLY)"; STATUS=1; }
 xcrun xcresulttool export attachments --path "$RESULT" --output-path /tmp/calendarlab-shots >/dev/null 2>&1 || true
 ls /tmp/calendarlab-shots 2>/dev/null | head -20
+exit ${STATUS:-0}
