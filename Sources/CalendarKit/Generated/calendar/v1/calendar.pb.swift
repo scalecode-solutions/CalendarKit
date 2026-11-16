@@ -1280,7 +1280,7 @@ public nonisolated struct Calendar_V1_IntimateContent: @unchecked Sendable {
     set {_uniqueStorage()._solo = newValue}
   }
 
-  /// vaginal | anal | oral | manual | other
+  /// vaginal | oral_giving | oral_receiving | anal | manual | toys | other
   public var types: [String] {
     get {_storage._types}
     set {_uniqueStorage()._types = newValue}
@@ -1313,7 +1313,7 @@ public nonisolated struct Calendar_V1_IntimateContent: @unchecked Sendable {
     set {_uniqueStorage()._initiatedBy = newValue}
   }
 
-  /// bedroom | living_room | ... | other
+  /// bedroom | living_room | shower | car | outdoors | hotel | other | ""
   public var location: String {
     get {_storage._location}
     set {_uniqueStorage()._location = newValue}

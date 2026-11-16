@@ -155,6 +155,34 @@ struct LiveTransportTests {
         }
     }
 
+    /// Every word the entry editor offers is one the server takes: a type,
+    /// location or initiator it doesn't know refuses the whole save ("Oral
+    /// (giving)" once did). Reads PrivateChoices, so a new word is checked too.
+    /// One entry, updated in place, to stay well under the write limit; the
+    /// server's error names the word it refused.
+    @Test func everyWordTheEditorOffersSaves() async throws {
+        let t = live.ownerT, p = live.partnerT
+        let cal = try await own(t)
+        _ = try await t.setConsent(calendarID: cal.id, kind: .intimate, on: true)
+        _ = try await p.setConsent(calendarID: cal.id, kind: .intimate, on: true)
+        var c = CalPrivateContent(at: monday9, timeZone: chicago)
+        c.solo = true
+        c.types = PrivateChoices.types
+        c.protection = PrivateChoices.protection
+        c.positions = PrivateChoices.positions
+        var entry = try await t.savePrivateEntry(CalPrivateEntry(calendarID: cal.id, content: c, createdBy: live.owner), baseRev: 0)
+        let locations = [""] + PrivateChoices.locations
+        for (n, place) in locations.enumerated() {
+            entry.content.location = place
+            entry.content.initiatedBy = PrivateChoices.initiated[n % PrivateChoices.initiated.count]
+            entry = try await t.savePrivateEntry(entry, baseRev: entry.rev)
+        }
+        #expect(locations.count >= PrivateChoices.initiated.count)
+        _ = try await t.deletePrivateEntry(id: entry.id, baseRev: entry.rev)
+        _ = try await t.setConsent(calendarID: cal.id, kind: .intimate, on: false)
+        _ = try await p.setConsent(calendarID: cal.id, kind: .intimate, on: false)
+    }
+
     @Test func privateSettingsRoundTrip() async throws {
         let t = live.ownerT
         let cal = try await own(t)

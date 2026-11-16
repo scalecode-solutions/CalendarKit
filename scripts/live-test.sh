@@ -11,7 +11,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 OWNER=${1:?usage: scripts/live-test.sh <owner-uuid> <partner-uuid> (test accounts)}
 PARTNER=${2:?usage: scripts/live-test.sh <owner-uuid> <partner-uuid> (test accounts)}
-SERVER=../mvCalendar
+SERVER=${SERVER:-../mvCalendar}
 BASE=${BASE:-http://localhost:6100}   # a throwaway server: BASE=http://localhost:6101 CAL_DB=<its container>
 SIM=${SIM:-CalendarLab27}
 SIM_ID=$(xcrun simctl list devices available | sed -nE "s/^ +$SIM \(([0-9A-F-]{36})\).*/\1/p" | head -1)   # by id: xcodebuild sometimes misses a sim by name
