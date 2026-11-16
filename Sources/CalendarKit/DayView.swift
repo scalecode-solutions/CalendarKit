@@ -77,33 +77,39 @@ struct DayView: View {
 
     // MARK: sections
 
+    /// Stacked, so nothing is cut at large text sizes: "Tomorrow", the full
+    /// date (wrapping, never scaled down), then ‹ … Today … › with the
+    /// chevrons at the two ends (they don't move when Today comes and goes).
     private var header: some View {
-        HStack(alignment: .center, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 if let when = relative {
                     Text(when).font(.subheadline.weight(.semibold)).foregroundStyle(.tint)
                 }
                 Text(CalFormat.template(day.year == today.year ? "EEEEMMMMd" : "EEEEMMMMdyyyy").string(from: day.utcMidnight))
                     .font(.title2.weight(.semibold))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.6)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
             .accessibilityIdentifier("dayViewHeader")
-            Spacer(minLength: 4)
-            if day != today {
-                Button("Today") { withAnimation(.snappy) { day = today } }
-                    .cardButton()
+            HStack(spacing: 8) {
+                Button { step(-1) } label: { Image(systemName: "chevron.left").frame(width: 28, height: 28) }
+                    .cardButton(circle: true)
+                    .accessibilityLabel("Previous day")
+                Spacer(minLength: 0)
+                if day != today {
+                    Button { withAnimation(.snappy) { day = today } } label: { Text("Today").frame(minHeight: 32) }
+                        .cardButton()
+                }
+                Spacer(minLength: 0)
+                Button { step(1) } label: { Image(systemName: "chevron.right").frame(width: 28, height: 28) }
+                    .cardButton(circle: true)
+                    .accessibilityLabel("Next day")
             }
-            Button { step(-1) } label: { Image(systemName: "chevron.left").frame(width: 18, height: 18) }
-                .cardButton(circle: true)
-                .accessibilityLabel("Previous day")
-            Button { step(1) } label: { Image(systemName: "chevron.right").frame(width: 18, height: 18) }
-                .cardButton(circle: true)
-                .accessibilityLabel("Next day")
+            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         }
-        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
         .calendarCard(cornerRadius: 24)
