@@ -116,6 +116,7 @@ private struct PartnersSection: View {
     let pair: CalCalendar
     @State private var newName = ""
     @State private var newColor: CalColor = .none
+    @State private var removing: CalPartner?
 
     var body: some View {
         // Removed partners (archived under the hood) stay on old entries only.
@@ -132,7 +133,8 @@ private struct PartnersSection: View {
                 }
                 .swipeActions {
                     if !pair.frozen {
-                        Button("Remove", role: .destructive) { remove(p, engine) }
+                        // There's no way back, so a swipe asks too.
+                        Button("Remove", role: .destructive) { removing = p }
                     }
                 }
                 .accessibilityIdentifier("privacy.partner.\(p.name)")
@@ -151,6 +153,12 @@ private struct PartnersSection: View {
             }
         } header: {
             Text("Partners")
+                .confirmationDialog("Remove \(removing?.name ?? "")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+                                    titleVisibility: .visible, presenting: removing) { p in
+                    Button("Remove", role: .destructive) { remove(p, engine) }
+                } message: { _ in
+                    Text("It leaves this list and the pickers. Past entries keep the name.")
+                }
         } footer: {
             Text("One list for this calendar: you both see it and add to it, and the entry editor picks from it. A color draws the heart in it; without one the heart takes the color of whoever logged it. Removing a name keeps it on past entries.")
         }
@@ -179,6 +187,14 @@ private struct PartnerEditor: View {
     let engine: CalendarEngine
     @State var partner: CalPartner
     @State private var confirmRemove = false
+    /// As it was opened: Remove doesn't save an unsaved rename.
+    private let original: CalPartner
+
+    init(engine: CalendarEngine, partner: CalPartner) {
+        self.engine = engine
+        _partner = State(initialValue: partner)
+        original = partner
+    }
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -202,7 +218,7 @@ private struct PartnerEditor: View {
         }
         .confirmationDialog("Remove \(partner.name)?", isPresented: $confirmRemove, titleVisibility: .visible) {
             Button("Remove", role: .destructive) {
-                remove(partner, engine)
+                remove(original, engine)
                 dismiss()
             }
         }

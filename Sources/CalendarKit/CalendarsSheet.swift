@@ -116,7 +116,7 @@ public struct PairSettingsView: View {
                         NavigationLink("Privacy") { PairPrivacySheet(engine: engine, calendar: c) }
                             .accessibilityIdentifier("pair.privacy")
                     } footer: {
-                        Text(c.frozen ? "You aren't friends now, so this calendar is read-only."
+                        Text(c.frozen ? "You two aren't friends any more, so this calendar is read-only."
                                       : "These belong to your calendar with \(engine.displayName(c)): you both see and change them.")
                     }
                 }
