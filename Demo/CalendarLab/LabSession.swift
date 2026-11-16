@@ -5,8 +5,9 @@ import CalendarKit
 /// screen and the app is in the foreground — the shape a production host uses
 /// (one engine per signed-in person, many entry points holding it).
 ///
-/// Every calendar surface holds it for as long as it's visible (`holdsCalendar`);
-/// holds are counted, so the Home tile and a conversation's calendar can't fight.
+/// Every calendar screen holds it for as long as the screen is in its navigation
+/// stack (`LabCalendarHold`); holds are counted, so the Home tile and a
+/// conversation's calendar can't fight.
 @MainActor
 @Observable
 final class LabSession {
@@ -31,15 +32,6 @@ final class LabSession {
     func release() {
         holders = max(0, holders - 1)
         sync()
-    }
-
-    /// Hold the engine for as long as the caller's task lives.
-    func run() async {
-        acquire()
-        while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(3600))
-        }
-        release()
     }
 
     /// The scene went to the background (false) or came back (true). Driven
