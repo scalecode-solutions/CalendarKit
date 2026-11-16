@@ -206,6 +206,7 @@ public final class CalendarEngine {
         guard let store else { return }
         var changed = store.eventChanges != publishedEventChanges
         publishedEventChanges = store.eventChanges
+        if store.privateChanges != publishedPrivateChanges { publishedPrivateChanges = store.privateChanges; changed = true }
         // Automatic colors before the comparison, so an unchanged list still
         // compares equal and doesn't rebuild the views. New or changed ones are
         // remembered, so the next friend doesn't move them.
@@ -235,6 +236,7 @@ public final class CalendarEngine {
         if changed { revision += 1 }
     }
     private var publishedEventChanges = -1
+    private var publishedPrivateChanges = -1
 
     public func dismissNotice(_ n: CalNotice) { notices.removeAll { $0.id == n.id } }
 
@@ -354,7 +356,7 @@ public final class CalendarEngine {
                 publish()
                 // More of a calendar (or calendars the server didn't get to):
                 // ask again.
-                if !page.deltas.contains(where: \.hasMore) { break }
+                if !page.deltas.contains(where: { $0.hasMore || $0.privateDelta.hasMore }) { break }
             }
             store.lastSync = Date()
             store.save()
@@ -405,6 +407,7 @@ public final class CalendarEngine {
             // last answer is lost, the next delta still carries it; that's safe
             // (loadFrom ≤ rev, so the server only judges purges more strictly).
             store.setCursor(d.calendarID, d.rev, loadFrom: d.loadFrom)
+            applyPrivate(d.privateDelta, calendarID: d.calendarID, held: held[d.calendarID]?.intimate ?? 0, store: store)
         }
     }
 
@@ -556,6 +559,32 @@ public final class CalendarEngine {
             store.putLabel(try live(try await transport.saveLabel(id: l.id, calendarID: l.calendarID, name: l.name, color: l.color)))
         case .deleteLabel(let id, _):
             try await transport.deleteLabel(id: id)
+        case .savePrivate(let e, let base):
+            let saved = try live(try await transport.savePrivateEntry(e, baseRev: base))
+            // Later queued saves of the same entry were built on this one.
+            for (qpid, q) in store.pending() where qpid != pid {
+                if case .savePrivate(let qe, _) = q, qe.id == e.id { store.replacePending(qpid, with: .savePrivate(qe, baseRev: saved.rev)) }
+                if case .deletePrivate(let qid, _, let c) = q, qid == e.id { store.replacePending(qpid, with: .deletePrivate(id: qid, baseRev: saved.rev, calendarID: c)) }
+            }
+            let waiting = store.pending().contains { (qpid, q) in
+                if case .savePrivate(let qe, _) = q, qe.id == e.id, qpid != pid { return true }
+                return false
+            }
+            if !waiting { store.putPrivate(saved, pending: false) }
+        case .deletePrivate(let id, let base, _):
+            do { _ = try await transport.deletePrivateEntry(id: id, baseRev: base) } catch CalTransportError.notFound {}
+            _ = try live(())
+            store.removePrivate(id)
+        case .savePartner(let p):
+            store.putPartner(try live(try await transport.savePartner(p)))
+        case .consent(let id, let kind, let on):
+            let c = try live(try await transport.setConsent(calendarID: id, kind: kind, on: on))
+            store.updateCalendar(id) { local in
+                var n = c
+                n.autoColor = local.autoColor
+                n.intimateCursor = local.intimateCursor
+                local = n
+            }
         case .openPair(let other, let id):
             let c = try live(try await transport.openPair(otherID: other))
             guard c.id == id else { throw CalTransportError.badResponse("the pair's id isn't the one computed") }
@@ -630,6 +659,26 @@ public final class CalendarEngine {
     private func isOpenPair(_ w: PendingWrite) -> Bool {
         if case .openPair = w { return true }
         return false
+    }
+
+    /// One calendar's private changes: a reset drops everything held for it;
+    /// else tombstones go and the rest is upserted (a private row with a
+    /// change still waiting is left alone), and the private cursor moves on.
+    private func applyPrivate(_ d: CalPrivateDelta, calendarID: UUID, held: Int64, store: CalendarStore) {
+        if d.reset {
+            store.clearPrivate(calendarID)
+            return
+        }
+        guard d.rev > 0 || !d.entries.isEmpty || !d.partners.isEmpty else { return }
+        if held == 0 && d.rev > 0 && !d.hasMore { /* a full load: nothing older to keep */ }
+        for e in d.entries {
+            if e.deleted { store.removePrivate(e.id) }
+            else if !store.isPrivatePending(e.id) { store.putPrivate(e, pending: false) }
+        }
+        for p in d.partners {
+            if p.deleted { store.removePrivate(p.id) } else { store.putPartner(p) }
+        }
+        if d.rev > 0 { store.setPrivateCursor(calendarID, d.rev) }
     }
 
     private func refreshPendingFlags(_ store: CalendarStore) {
@@ -892,6 +941,89 @@ public final class CalendarEngine {
             store.put(c, pending: store.isPending(e.id))
         }
         commit(.deleteLabel(id: label.id, calendarID: label.calendarID))
+    }
+
+    // MARK: private entries (0.8.0 design sprint, PROVISIONAL)
+
+    /// The person's own consent for a kind on a pair. Intimate entries show
+    /// only once both members have turned it on.
+    public func setConsent(_ calendar: CalCalendar, _ kind: CalConsentKind, _ on: Bool) {
+        openStore() // a write before the first refresh must not be lost
+        if !calendar.listed { store?.putUnlistedPair(calendar) }
+        store?.updateCalendar(calendar.id) { c in
+            switch kind {
+            case .intimate: c.intimateMine = on
+            case .cycle: c.cycleMine = on
+            }
+        }
+        commit(.consent(calendarID: calendar.id, kind: kind, on: on))
+    }
+
+    /// Add or change a private entry (shown at once, sent in order).
+    public func savePrivate(_ entry: CalPrivateEntry) {
+        openStore() // a write before the first refresh must not be lost
+        guard let store else { return }
+        var e = entry
+        e.updatedBy = config.currentUserID
+        let base = store.privateEntry(e.id)?.rev ?? 0
+        store.putPrivate(e, pending: true)
+        commit(.savePrivate(e, baseRev: base))
+    }
+
+    /// Log one now, with who left to fill in later (a hollow heart).
+    @discardableResult
+    public func quickLog(in calendar: CalCalendar, at: Date = Date()) -> CalPrivateEntry {
+        var content = CalPrivateContent(at: at)
+        content.quickLog = true
+        let e = CalPrivateEntry(calendarID: calendar.id, content: content, createdBy: config.currentUserID)
+        savePrivate(e)
+        return e
+    }
+
+    public func deletePrivate(_ entry: CalPrivateEntry) {
+        openStore() // a write before the first refresh must not be lost
+        guard let store else { return }
+        let base = store.privateEntry(entry.id)?.rev ?? entry.rev
+        store.removePrivate(entry.id)
+        commit(.deletePrivate(id: entry.id, baseRev: base, calendarID: entry.calendarID))
+    }
+
+    /// Add or change a name on a pair's partner list (shared by both).
+    public func savePartner(_ partner: CalPartner) {
+        openStore() // a write before the first refresh must not be lost
+        store?.putPartner(partner)
+        commit(.savePartner(partner))
+    }
+
+    /// The private entries the person may see: on pairs where both members
+    /// consented, between two days (in the viewer's zone).
+    public func privateEntries(from: CalDate, through: CalDate, zone: TimeZone = .current,
+                               only: Set<UUID>? = nil) -> [CalPrivateEntry] {
+        _ = revision
+        guard let store else { return [] }
+        let on = Set(calendars.filter { c in c.intimateOn && (only.map { $0.contains(c.id) } ?? c.visible) }.map(\.id))
+        return store.privateEntries()
+            .filter { on.contains($0.calendarID) && !$0.deleted }
+            .filter { let d = $0.day(in: zone); return d >= from && d <= through }
+            .sorted { $0.content.at < $1.content.at }
+    }
+
+    /// A pair's partner list (archived ones last).
+    public func partners(of calendar: CalCalendar) -> [CalPartner] {
+        _ = revision
+        return (store?.partners() ?? []).filter { $0.calendarID == calendar.id && !$0.deleted }
+            .sorted { ($0.archived ? 1 : 0, $0.name.lowercased()) < ($1.archived ? 1 : 0, $1.name.lowercased()) }
+    }
+
+    /// A day's hearts (plan decision 9): one per author, the partner's color
+    /// when every partner of the author's entries shares one, else the
+    /// author's (the person's own accent, or the pair's color for the other's).
+    public func hearts(_ entries: [CalPrivateEntry]) -> [CalHeart] {
+        let partners = Dictionary((store?.partners() ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return CalHeart.hearts(entries, partners: partners) { e in
+            e.createdBy == self.config.currentUserID ? self.accentColor
+                : (self.calendar(e.calendarID)?.displayColor ?? .gray)
+        }
     }
 
     // Online only: they need the server's answer.

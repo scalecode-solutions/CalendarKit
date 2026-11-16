@@ -223,6 +223,11 @@ enum PendingWrite: Codable, Equatable, Sendable {
     /// Before the first write to a pair the server hasn't listed: makes sure it
     /// exists there (writes to it can't land before).
     case openPair(otherID: UUID, calendarID: UUID)
+    // Private entries (0.8.0 design sprint, PROVISIONAL).
+    case savePrivate(CalPrivateEntry, baseRev: Int64)
+    case deletePrivate(id: UUID, baseRev: Int64, calendarID: UUID)
+    case savePartner(CalPartner)
+    case consent(calendarID: UUID, kind: CalConsentKind, on: Bool)
 
     /// A V1 queue row for a reminder write (`alerts` / `alertDefaults`, the
     /// cases removed in MVCALE-15), by its encoded case name.
@@ -251,6 +256,9 @@ enum PendingWrite: Codable, Equatable, Sendable {
         case .saveLabel(let l): return l.calendarID
         case .deleteLabel(_, let c): return c
         case .pref(let c, _, _), .openPair(_, let c): return c
+        case .savePrivate(let e, _): return e.calendarID
+        case .deletePrivate(_, _, let c), .consent(let c, _, _): return c
+        case .savePartner(let p): return p.calendarID
         }
     }
 }
