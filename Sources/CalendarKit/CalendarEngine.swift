@@ -157,6 +157,14 @@ public final class CalendarEngine {
     var protectedDataAvailable: @MainActor () -> Bool = { UIApplication.shared.isProtectedDataAvailable }
     private var lockedNoticeShown = false
 
+    /// Whether a change can be saved now: the store is open (or opens). False
+    /// while the phone is locked and the store's files are protected; the
+    /// editor keeps its sheet open then, rather than lose the change.
+    public func canSave() -> Bool {
+        openStore()
+        return store != nil
+    }
+
     private func openStore() {
         guard store == nil, !isWiped else { return }
         do {

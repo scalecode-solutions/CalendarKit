@@ -132,6 +132,9 @@ struct EventEditorView: View {
         case .failure(let p):
             problem = CalEventDraft.describe(p)
         case .success(let fields):
+            // The phone is locked and the store can't open: a write now would
+            // go nowhere. Keep the editor open and say why (MVCALE-39).
+            guard engine.canSave() else { problem = "Unlock your phone to save this."; return }
             switch request {
             case .new:
                 guard let cal = draft.calendarID else { problem = "Choose a calendar"; return }

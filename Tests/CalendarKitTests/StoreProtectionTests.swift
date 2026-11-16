@@ -71,3 +71,24 @@ struct StoreProtectionTests {
     }
 }
 
+/// MVCALE-39: a change made while the store is locked isn't silently lost:
+/// the engine says it can't save, so the editor stays open.
+@MainActor
+@Suite("Store protection, saving", .serialized)
+struct LockedSaveTests {
+    @Test func aLockedStoreSaysItCantSave() async throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "ck-locked-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let me = UUID()
+        try Data("not a database".utf8).write(to: dir.appending(path: "Calendar-\(me.uuidString).store"))
+        let engine = CalendarEngine(config: CalendarConfig(baseURL: URL(string: "http://fake")!, currentUserID: me,
+                                                           tokenProvider: { "t" }, storeDirectory: dir),
+                                    transport: FakeServer(me: me))
+        engine.protectedDataAvailable = { false }
+        #expect(!engine.canSave())
+        try FileManager.default.removeItem(at: dir.appending(path: "Calendar-\(me.uuidString).store"))
+        engine.protectedDataAvailable = { true }
+        #expect(engine.canSave())
+    }
+}
