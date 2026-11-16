@@ -11,6 +11,7 @@
 		1630BE9AE659804E21194670 /* LabShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41AD81E82ABD35F4E54B2FD1 /* LabShell.swift */; };
 		26EC17B29F9FE3D57BC3B401 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC0C82600FBA4BB1ADC6523A /* LoginView.swift */; };
 		30F9DCCFFF569C6A904FB204 /* AuthModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F48437635B4C0FDBE9EF520C /* AuthModel.swift */; };
+		40761E07CC46D5A105F5307B /* IntimacyLookUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 801490E9F07F8AC9D88693B8 /* IntimacyLookUITests.swift */; };
 		95C2611FEC4B0C8D9AF39813 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB4ACF0F49525A97F739C12E /* ContentView.swift */; };
 		A37971E587553D6EBC32C44E /* LabSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FB366C47A9E017B18490CE9 /* LabSession.swift */; };
 		A9DE80DFE32AC2770D63F440 /* CalendarLabApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71C8E0D95013F4403A734B3D /* CalendarLabApp.swift */; };
@@ -32,9 +33,10 @@
 
 /* Begin PBXFileReference section */
 		41AD81E82ABD35F4E54B2FD1 /* LabShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabShell.swift; sourceTree = "<group>"; };
+		7D5885610C40DCDC3C83B4F3 /* CalendarKit-torsion-lab */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "CalendarKit-torsion-lab"; path = ..; sourceTree = SOURCE_ROOT; };
 		6908030F3F85F421652123C1 /* CalendarLab.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CalendarLab.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		71C8E0D95013F4403A734B3D /* CalendarLabApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarLabApp.swift; sourceTree = "<group>"; };
-		7D5885610C40DCDC3C83B4F3 /* CalendarKit-torsion-lab */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "CalendarKit-torsion-lab"; path = ..; sourceTree = SOURCE_ROOT; };
+		801490E9F07F8AC9D88693B8 /* IntimacyLookUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntimacyLookUITests.swift; sourceTree = "<group>"; };
 		9FB366C47A9E017B18490CE9 /* LabSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabSession.swift; sourceTree = "<group>"; };
 		CDD1FD445129C48E32647C71 /* Lab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Lab.swift; sourceTree = "<group>"; };
 		DB5A2B00CFAED683CBE86B0A /* LabShellUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabShellUITests.swift; sourceTree = "<group>"; };
@@ -81,6 +83,7 @@
 			isa = PBXGroup;
 			children = (
 				F17F6FBC1FEEE578E5982C66 /* CalendarLabUITests.swift */,
+				801490E9F07F8AC9D88693B8 /* IntimacyLookUITests.swift */,
 				DB5A2B00CFAED683CBE86B0A /* LabShellUITests.swift */,
 			);
 			path = CalendarLabUITests;
@@ -213,6 +216,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				CD65C6C193A88DE3F7BCD7EB /* CalendarLabUITests.swift in Sources */,
+				40761E07CC46D5A105F5307B /* IntimacyLookUITests.swift in Sources */,
 				0FD20CB6784DE09DA1C95736 /* LabShellUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -14,6 +14,9 @@ struct DayView: View {
     let inPair: UUID?
     /// Focused on one person: then + adds only to `inPair`, and with none, nothing.
     let focused: Bool
+    /// What's on screen (the pairs, and All / Events / Intimate): the private
+    /// sections follow it as the events do.
+    let scope: CalScope
     /// The day's occurrences, from the calendar screen, so the day shows
     /// exactly what the grid does.
     let occurrences: (CalDate) -> [CalOccurrence]
@@ -21,9 +24,10 @@ struct DayView: View {
     @State private var day: CalDate
     @State private var editor: EditorRequest?
     @State private var detail: CalOccurrence?
+    @State private var privateSheet: PrivateSheet?
 
     init(engine: CalendarEngine, appearance: CalendarAppearance, zone: TimeZone, day: CalDate,
-         showOwners: Bool, inPair: UUID? = nil, focused: Bool = false,
+         showOwners: Bool, inPair: UUID? = nil, focused: Bool = false, scope: CalScope = .everyone,
          occurrences: @escaping (CalDate) -> [CalOccurrence]) {
         self.engine = engine
         self.appearance = appearance
@@ -31,6 +35,7 @@ struct DayView: View {
         self.showOwners = showOwners
         self.inPair = inPair
         self.focused = focused
+        self.scope = scope
         self.occurrences = occurrences
         _day = State(initialValue: day)
     }
@@ -49,7 +54,8 @@ struct DayView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     header
-                    events(occ)
+                    PrivateDaySections(engine: engine, day: day, zone: zone, scope: scope) { privateSheet = $0 }
+                    if scope.kind.showsEvents { events(occ) }
                 }
                 .padding(.horizontal, 12)
                 .padding(.top, 4)
@@ -63,13 +69,23 @@ struct DayView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { editor = .new(day, in: inPair) } label: { Image(systemName: "plus") }
-                    .accessibilityLabel(appearance.newEvent)
-                    .disabled(!canAdd)
+                let intimate = PrivateIndex.intimatePairs(engine: engine, scope: scope).filter { !$0.frozen }
+                if intimate.isEmpty {
+                    Button { editor = .new(day, in: inPair) } label: { Image(systemName: "plus") }
+                        .accessibilityLabel(appearance.newEvent)
+                        .disabled(!canAdd)
+                } else {
+                    // The cycle is logged in its section here, so no Log period.
+                    AddMenu(engine: engine, appearance: appearance, intimate: intimate, cycle: [],
+                            canAddEvent: canAdd, newEvent: { editor = .new(day, in: inPair) },
+                            newPrivate: { privateSheet = .new(day: day, pairs: intimate.map(\.id)) },
+                            logPeriod: nil, label: AnyView(Image(systemName: "plus")))
+                }
             }
         }
         .calendarAccent(engine.accentColor)
         .eventSheets(engine: engine, editor: $editor, detail: $detail)
+        .privateSheets(engine: engine, sheet: $privateSheet)
         // VoiceOver can't swipe between days; these do the same.
         .accessibilityAction(named: "Previous day") { step(-1) }
         .accessibilityAction(named: "Next day") { step(1) }

@@ -78,8 +78,23 @@ public struct CalendarView: View {
     /// What the focus puts on screen: one pair (hidden or not) colored by who
     /// added what, or every pair that isn't hidden.
     private var scope: CalScope {
-        guard case .person = focus else { return .everyone }
-        return CalScope(only: Set(focusedPair.map { [$0.id] } ?? []), byAuthor: true)
+        var s = CalScope.everyone
+        if case .person = focus { s = CalScope(only: Set(focusedPair.map { [$0.id] } ?? []), byAuthor: true) }
+        s.kind = hasPrivate ? kind : .all
+        return s
+    }
+
+    /// The All / Events / Intimate filter, remembered on the device.
+    @AppStorage(CalKind.storageKey) private var kind: CalKind = .all
+    @State private var privateSheet: PrivateSheet?
+
+    /// Any pair on screen with intimate entries or cycle on: then the filter
+    /// shows, and + is a menu.
+    private var hasPrivate: Bool {
+        var s = CalScope.everyone
+        if case .person = focus { s.only = Set(focusedPair.map { [$0.id] } ?? []) }
+        return !PrivateIndex.intimatePairs(engine: engine, scope: s).isEmpty
+            || !PrivateIndex.cyclePairs(engine: engine, scope: s).isEmpty
     }
 
 
@@ -92,6 +107,7 @@ public struct CalendarView: View {
         _ = engine.revision
         let days = layout.weeks.flatMap { $0 }
         let s = scope
+        guard s.kind.showsEvents else { return [:] }
         return DayIndex.group(engine.occurrences(from: days.first!, through: days.last!, zone: zone,
                                                  only: s.only, byAuthor: s.byAuthor),
                               from: days.first!, through: days.last!, zone: zone)
@@ -114,16 +130,19 @@ public struct CalendarView: View {
                 case .month: monthContent
                 case .agenda:
                     AgendaList(engine: engine, appearance: appearance, zone: zone, scope: scope,
-                               showOwners: showOwners, open: { detail = $0 }, openDay: { openDay = $0 })
+                               showOwners: showOwners, open: { detail = $0 }, openDay: { openDay = $0 },
+                               openPrivate: { privateSheet = $0 })
                 }
             }
             .padding(.top, 4)
         }
         .calendarAccent(engine.accentColor)
         .eventSheets(engine: engine, editor: $editor, detail: $detail)
+        .privateSheets(engine: engine, sheet: $privateSheet)
         .navigationDestination(item: $openDay) { day in
             DayView(engine: engine, appearance: appearance, zone: zone, day: day,
-                    showOwners: showOwners, inPair: focusedPair?.id, focused: isFocused, occurrences: dayOccurrences)
+                    showOwners: showOwners, inPair: focusedPair?.id, focused: isFocused, scope: scope,
+                    occurrences: dayOccurrences)
         }
         .onChange(of: mode) { _, m in
             // Only "Last used" remembers the switch; a fixed choice lasts for the visit.
@@ -138,7 +157,8 @@ public struct CalendarView: View {
     /// One day's occurrences: the same set the grid draws, so the focus
     /// narrows the day view too, in one place.
     private func dayOccurrences(_ day: CalDate) -> [CalOccurrence] {
-        DayIndex.occurrences(on: day, engine: engine, zone: zone, scope: scope)
+        guard scope.kind.showsEvents else { return [] }
+        return DayIndex.occurrences(on: day, engine: engine, zone: zone, scope: scope)
     }
 
     /// The kit's own control row: Month / Agenda, and "+".
@@ -151,10 +171,55 @@ public struct CalendarView: View {
             .pickerStyle(.segmented)
             .frame(maxWidth: 220)
             Spacer()
-            Button { editor = .new(today, in: focusedPair?.id) } label: {
-                Image(systemName: "plus").font(.body.weight(.semibold)).frame(width: 22, height: 22)
-                    .foregroundStyle(CalOnTint(engine.accentColor))
+            if hasPrivate { kindFilter }
+            if hasPrivate {
+                let s = scope
+                AddMenu(engine: engine, appearance: appearance,
+                        intimate: PrivateIndex.intimatePairs(engine: engine, scope: s).filter { !$0.frozen },
+                        cycle: PrivateIndex.cyclePairs(engine: engine, scope: s).filter { !$0.frozen },
+                        canAddEvent: canAdd,
+                        newEvent: { editor = .new(today, in: focusedPair?.id) },
+                        newPrivate: {
+                            privateSheet = .new(day: today, pairs: PrivateIndex.intimatePairs(engine: engine, scope: s)
+                                .filter { !$0.frozen }.map(\.id))
+                        },
+                        logPeriod: { openDay = today },
+                        label: AnyView(plusGlyph))
+                    .buttonStyle(.glassProminent)
+                    .buttonBorderShape(.circle)
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                    .accessibilityShowsLargeContentViewer()
+            } else {
+                plusButton
             }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private var plusGlyph: some View {
+        Image(systemName: "plus").font(.body.weight(.semibold)).frame(width: 22, height: 22)
+            .foregroundStyle(CalOnTint(engine.accentColor))
+    }
+
+    /// All / Events / Intimate: a menu, filled while it narrows the view.
+    private var kindFilter: some View {
+        Menu {
+            Picker("Show", selection: $kind.animation(.snappy)) {
+                ForEach(CalKind.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+        } label: {
+            Image(systemName: kind == .all ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                .font(.title2)
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .accessibilityLabel("Show")
+        .accessibilityValue(kind.title)
+        .accessibilityIdentifier("kindFilter")
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+
+    private var plusButton: some View {
+        Button { editor = .new(today, in: focusedPair?.id) } label: { plusGlyph }
             .buttonStyle(.glassProminent)
             .buttonBorderShape(.circle)
             .accessibilityLabel(appearance.newEvent)
@@ -163,8 +228,6 @@ public struct CalendarView: View {
             // viewer shows it instead of the glyph outgrowing its circle.
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .accessibilityShowsLargeContentViewer()
-        }
-        .padding(.horizontal, 16)
     }
 
     /// The month in a scroll view: at large text sizes on a small phone the
@@ -232,7 +295,9 @@ public struct CalendarView: View {
     }
 
     private func grid(_ index: [CalDate: [CalOccurrence]]) -> some View {
-        VStack(spacing: 2) {
+        let days = layout.weeks.flatMap { $0 }
+        let marks = PrivateIndex.marks(engine: engine, from: days.first!, through: days.last!, zone: zone, scope: scope)
+        return VStack(spacing: 2) {
             ForEach(layout.weeks, id: \.first) { week in
                 // A faint rule above every week but the first: a day's chips
                 // sit at the bottom of its cell, right over the next week's
@@ -243,10 +308,10 @@ public struct CalendarView: View {
                         let occ = index[day] ?? []
                         Button { openDay = day } label: {
                             DayCell(day: day, inMonth: layout.contains(day), isToday: day == today,
-                                    chips: DayChip.chips(occ), eventCount: occ.count)
+                                    chips: DayChip.chips(occ), eventCount: occ.count, marks: marks[day])
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel(DayCell.spoken(day, isToday: day == today, events: occ.count))
+                        .accessibilityLabel(DayCell.spoken(day, isToday: day == today, events: occ.count, marks: marks[day]))
                         .accessibilityHint("Opens the day")
                     }
                 }
@@ -306,6 +371,8 @@ struct AgendaList: View {
     let open: (CalOccurrence) -> Void
     /// A day header was tapped: open that day.
     let openDay: (CalDate) -> Void
+    /// An intimate entry was tapped.
+    var openPrivate: (PrivateSheet) -> Void = { _ in }
     @State private var days = 60
 
     private var today: CalDate { CalDate(Date(), in: zone) }
@@ -313,14 +380,26 @@ struct AgendaList: View {
     private var groups: [(CalDate, [CalOccurrence])] {
         _ = engine.revision
         let through = today.adding(days: days - 1)
-        let index = DayIndex.group(engine.occurrences(from: today, through: through, zone: zone,
+        guard scope.kind.showsEvents else { return privateByDay.keys.sorted().map { ($0, []) } }
+        var index = DayIndex.group(engine.occurrences(from: today, through: through, zone: zone,
                                                       only: scope.only, byAuthor: scope.byAuthor),
                                    from: today, through: through, zone: zone)
+        for d in privateByDay.keys where index[d] == nil { index[d] = [] }
         return index.keys.sorted().map { ($0, index[$0]!) }
+    }
+
+    /// Intimate entries coming up (logged ahead is rare, but today's count),
+    /// by day, when the filter shows them.
+    private var privateByDay: [CalDate: [CalPrivateEntry]] {
+        guard scope.kind.showsPrivate else { return [:] }
+        let through = today.adding(days: days - 1)
+        return Dictionary(grouping: engine.privateEntries(from: today, through: through, zone: zone, only: scope.only),
+                          by: { $0.day(in: zone) })
     }
 
     var body: some View {
         let g = groups
+        let priv = privateByDay
         ScrollViewReader { proxy in
             VStack(spacing: 8) {
                 WeekStrip(today: today, marks: Dictionary(g.prefix(14).map { ($0.0, WeekStrip.dots($0.1)) },
@@ -342,6 +421,16 @@ struct AgendaList: View {
                         }
                         ForEach(g, id: \.0) { day, occ in
                             Section {
+                                ForEach(priv[day] ?? []) { e in
+                                    Button { openPrivate(.edit(e)) } label: {
+                                        PrivateEntryRow(engine: engine, entry: e, zone: zone)
+                                            .padding(.horizontal, 14)
+                                            .padding(.vertical, 6)
+                                            .calendarCard(cornerRadius: 18)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityIdentifier("privateEntryRow")
+                                }
                                 // Keyed by day too: a multi-day event is one occurrence on
                                 // several days, and one id twice in a lazy stack drew only
                                 // the first (the second day showed a blank gap).
@@ -624,6 +713,7 @@ struct DayCell: View {
     let isToday: Bool
     let chips: DayChip.Line
     var eventCount = 0
+    var marks: PrivateMarks? = nil
     @Environment(\.calendarAccent) private var accent
     /// The day's disc grows with Dynamic Type, up to what a seventh of a phone
     /// fits; past that the number shrinks to fit.
@@ -648,6 +738,14 @@ struct DayCell: View {
                 .background {
                     if isToday { Circle().fill(.tint) }
                 }
+                // The cycle's band runs the cell's full width, behind the number.
+                .frame(maxWidth: .infinity)
+                .background {
+                    if let k = marks?.cycle { CycleBand(kind: k, height: min(disc, 44) * 0.8).padding(.horizontal, -1.5) }
+                }
+                .overlay(alignment: .topTrailing) {
+                    if let h = marks?.hearts, !h.isEmpty { HeartMarks(hearts: h, size: min(chipHeight, 18) * 0.62) }
+                }
             // Two lines of chips, always reserved so every week row is the
             // same height: two titles, or one and "+N".
             VStack(spacing: 2) {
@@ -670,7 +768,7 @@ struct DayCell: View {
         .frame(maxWidth: .infinity, minHeight: 44)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(DayCell.spoken(day, isToday: isToday, events: eventCount))
+        .accessibilityLabel(DayCell.spoken(day, isToday: isToday, events: eventCount, marks: marks))
         .accessibilityAddTraits(.isButton)
     }
 }
@@ -679,12 +777,13 @@ extension DayCell {
     private static var dayFormatter: DateFormatter { CalFormat.template("EEEEMMMMd") }
 
     /// What VoiceOver says for a day: "Today, Saturday, November 14, 2 events".
-    static func spoken(_ day: CalDate, isToday: Bool, events: Int) -> String {
+    static func spoken(_ day: CalDate, isToday: Bool, events: Int, marks: PrivateMarks? = nil) -> String {
         var parts: [String] = []
         if isToday { parts.append(String(localized: "Today")) }
         parts.append(dayFormatter.string(from: day.utcMidnight))
         if events == 1 { parts.append(String(localized: "1 event")) }
         else if events > 1 { parts.append(String(localized: "\(events) events")) }
+        parts.append(contentsOf: marks?.spoken ?? [])
         return parts.joined(separator: ", ")
     }
 }
@@ -810,6 +909,8 @@ struct CalScope: Equatable {
     var only: Set<UUID>?
     /// Inside one pair: color and badge rows by who added them.
     var byAuthor: Bool
+    /// All, only events, or only intimate entries (plan decision 20).
+    var kind: CalKind = .all
 
     static let everyone = CalScope(only: nil, byAuthor: false)
 }
