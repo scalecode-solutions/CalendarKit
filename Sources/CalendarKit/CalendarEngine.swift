@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import Observation
 import os
 
@@ -107,8 +108,18 @@ public final class CalendarEngine {
         // signed out: openStore() refuses once isWiped is set, and a sign-out
         // that never opened the store left the last person's cache on disk.
         if store == nil { openStore() }
-        store?.wipeAll()
+        if let store, storeOnDisk {
+            store.wipeAll()
+        } else {
+            // The store on disk isn't the one open (it wouldn't open, as while
+            // the phone is locked): delete its files by path instead. Wiping
+            // an in-memory stand-in left the real cache behind.
+            store = nil
+            CalendarStore.deleteFiles(userID: config.currentUserID, appGroup: config.appGroup,
+                                      directory: config.storeDirectory, inMemory: storeInMemory)
+        }
         store = nil
+        storeOnDisk = false
         isWiped = true
         calendars = []
         labels = []
@@ -123,14 +134,36 @@ public final class CalendarEngine {
         revision += 1
     }
 
+    /// Whether `store` is the user's real store (on disk, or the in-memory
+    /// one tests ask for), not a stand-in after a failed open.
+    private var storeOnDisk = false
+    /// Whether the phone's protected files can be read now. A seam for tests.
+    var protectedDataAvailable: @MainActor () -> Bool = { UIApplication.shared.isProtectedDataAvailable }
+    private var lockedNoticeShown = false
+
     private func openStore() {
         guard store == nil, !isWiped else { return }
         do {
             store = try CalendarStore(userID: config.currentUserID, appGroup: config.appGroup,
                                       directory: config.storeDirectory, inMemory: storeInMemory)
+            storeOnDisk = true
+            lockedNoticeShown = false
         } catch {
             log.error("store failed to open: \(error.localizedDescription, privacy: .public)")
+            guard protectedDataAvailable() else {
+                // Locked: its files can't be read yet. Stay closed and try again
+                // on the next refresh or write, rather than an in-memory store
+                // that would swallow this launch's writes.
+                if !lockedNoticeShown {
+                    lockedNoticeShown = true
+                    notices.append(CalNotice(message: "Unlock your phone to use the calendar."))
+                }
+                return
+            }
+            // A store that won't open while unlocked (damaged): carry on in
+            // memory for this launch, and sync refills it.
             store = try? CalendarStore(userID: config.currentUserID, appGroup: nil, inMemory: true)
+            storeOnDisk = false
         }
         publish()
     }

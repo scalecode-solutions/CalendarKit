@@ -236,22 +236,51 @@ final class CalendarStore {
     /// `url`: tests only, a store file of their own.
     init(userID: UUID, appGroup: String?, directory: URL? = nil, inMemory: Bool = false, url: URL? = nil) throws {
         let schema = Schema(versionedSchema: CalendarSchemaV2.self)
-        let name = "Calendar-\(userID.uuidString)"
-        let config: ModelConfiguration
-        if let url {
-            config = ModelConfiguration(name, schema: schema, url: url)
-        } else if inMemory {
-            config = ModelConfiguration(name, schema: schema, isStoredInMemoryOnly: true)
-        } else if let directory {
+        if let directory, url == nil, !inMemory {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            config = ModelConfiguration(name, schema: schema, url: directory.appending(path: "\(name).store"))
+        }
+        let config = Self.configuration(userID: userID, appGroup: appGroup, directory: directory, inMemory: inMemory,
+                                        url: url, schema: schema)
+        container = try ModelContainer(for: schema, migrationPlan: CalendarMigrationPlan.self, configurations: config)
+    }
+
+    /// Where a user's store lives, decided the same way for opening it and
+    /// for deleting it without opening it.
+    nonisolated static func configuration(userID: UUID, appGroup: String?, directory: URL?, inMemory: Bool,
+                                          url: URL? = nil, schema: Schema = Schema(versionedSchema: CalendarSchemaV2.self))
+        -> ModelConfiguration {
+        let name = "Calendar-\(userID.uuidString)"
+        if let url {
+            return ModelConfiguration(name, schema: schema, url: url)
+        } else if inMemory {
+            return ModelConfiguration(name, schema: schema, isStoredInMemoryOnly: true)
+        } else if let directory {
+            return ModelConfiguration(name, schema: schema, url: directory.appending(path: "\(name).store"))
         } else if let appGroup,
                   let base = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) {
-            config = ModelConfiguration(name, schema: schema, url: base.appending(path: "\(name).store"))
+            return ModelConfiguration(name, schema: schema, url: base.appending(path: "\(name).store"))
         } else {
-            config = ModelConfiguration(name, schema: schema)
+            return ModelConfiguration(name, schema: schema)
         }
-        container = try ModelContainer(for: schema, migrationPlan: CalendarMigrationPlan.self, configurations: config)
+    }
+
+    /// Deletes a user's store files (the store and SQLite's -wal and -shm)
+    /// without opening it: for a sign-out when the store can't be opened, as
+    /// while the phone is locked and its files are protected. Nothing for an
+    /// in-memory store. Returns whether any file was left behind.
+    @discardableResult
+    nonisolated static func deleteFiles(userID: UUID, appGroup: String?, directory: URL?, inMemory: Bool) -> Bool {
+        guard !inMemory else { return false }
+        let store = configuration(userID: userID, appGroup: appGroup, directory: directory, inMemory: false).url
+        var left = false
+        for f in [store, URL(fileURLWithPath: store.path + "-wal"), URL(fileURLWithPath: store.path + "-shm")]
+        where FileManager.default.fileExists(atPath: f.path) {
+            do { try FileManager.default.removeItem(at: f) } catch {
+                log.error("couldn't delete a store file: \(error.localizedDescription, privacy: .public)")
+                left = true
+            }
+        }
+        return left
     }
 
     func encode<T: Encodable>(_ v: T) -> Data { (try? encoder.encode(v)) ?? Data() }
