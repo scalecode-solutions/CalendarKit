@@ -94,6 +94,19 @@ public struct CalCalendar: Identifiable, Equatable, Sendable, Codable {
     /// The caller's own display preference (false: hidden for them).
     public var visible: Bool
     public var prefColor: CalColor
+    /// Consent (0.8.0, PROVISIONAL): each member's own, per kind. Intimate
+    /// entries exist for this pair only while both are on.
+    public var intimateMine = false
+    public var intimateTheirs = false
+    public var cycleMine = false
+    public var cycleTheirs = false
+    /// The server's newest private change (meaningless while it's off).
+    public var intimateRev: Int64 = 0
+    /// Where this device is in the private stream. This device's, never synced.
+    public internal(set) var intimateCursor: Int64 = 0
+    /// Both members have turned intimate entries on.
+    public var intimateOn: Bool { intimateMine && intimateTheirs }
+
     /// Whether the server has listed it. A pair nobody has opened yet is shown
     /// from the caller's contacts (false) until its first write opens it.
     public internal(set) var listed: Bool = true
@@ -113,6 +126,31 @@ public struct CalCalendar: Identifiable, Equatable, Sendable, Codable {
         self.frozen = frozen
         self.visible = visible
         self.prefColor = prefColor
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, otherID, name, rev, frozen, visible, prefColor, listed, autoColor
+        case intimateMine, intimateTheirs, cycleMine, cycleTheirs, intimateRev, intimateCursor
+    }
+
+    /// Reads 0.7.x's stored payloads too (no consent fields then).
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        otherID = try c.decode(UUID.self, forKey: .otherID)
+        name = try c.decode(String.self, forKey: .name)
+        rev = try c.decode(Int64.self, forKey: .rev)
+        frozen = try c.decode(Bool.self, forKey: .frozen)
+        visible = try c.decode(Bool.self, forKey: .visible)
+        prefColor = try c.decode(CalColor.self, forKey: .prefColor)
+        listed = try c.decode(Bool.self, forKey: .listed)
+        autoColor = try c.decodeIfPresent(CalColor.self, forKey: .autoColor)
+        intimateMine = try c.decodeIfPresent(Bool.self, forKey: .intimateMine) ?? false
+        intimateTheirs = try c.decodeIfPresent(Bool.self, forKey: .intimateTheirs) ?? false
+        cycleMine = try c.decodeIfPresent(Bool.self, forKey: .cycleMine) ?? false
+        cycleTheirs = try c.decodeIfPresent(Bool.self, forKey: .cycleTheirs) ?? false
+        intimateRev = try c.decodeIfPresent(Int64.self, forKey: .intimateRev) ?? 0
+        intimateCursor = try c.decodeIfPresent(Int64.self, forKey: .intimateCursor) ?? 0
     }
 
     /// The color to draw it in for this person: their choice, else the
