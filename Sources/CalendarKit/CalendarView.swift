@@ -753,8 +753,8 @@ struct CalScope: Equatable {
     static let everyone = CalScope(only: nil, byAuthor: false)
 }
 
-/// The focus picker the kit shows when it owns the focus: Everyone, then a
-/// chip per shown pair, then the hidden ones in a menu.
+/// The focus picker the kit shows when it owns the focus: Everyone, the
+/// hidden ones in a menu, then a chip per shown pair.
 struct PeopleBar: View {
     let engine: CalendarEngine
     let focus: CalFocus
@@ -768,24 +768,29 @@ struct PeopleBar: View {
             HStack(spacing: 8) {
                 FocusChip(title: "Everyone", contact: nil, tint: engine.accentColor, selected: focus == .everyone,
                           systemImage: "person.2.fill") { choose(.everyone) }
-                ForEach(shown) { c in
-                    FocusChip(title: firstName(c), contact: engine.person(of: c), tint: c.displayColor,
-                              selected: focus == .person(c.otherID)) { choose(.person(c.otherID)) }
-                }
+                // Right after Everyone: last in a long row it ran off the edge
+                // of a small phone at large text sizes.
                 if !hidden.isEmpty {
                     Menu {
                         ForEach(hidden) { c in
                             Button(engine.displayName(c)) { choose(.person(c.otherID)) }
                         }
                     } label: {
+                        // Selected while one of the hidden pairs is in focus.
+                        let on = hidden.contains { focus == .person($0.otherID) }
                         Text("Hidden (\(hidden.count))")
                             .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(on ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
-                            .background { Capsule().fill(.quaternary) }
+                            .background { Capsule().fill(on ? AnyShapeStyle(.tint.opacity(0.18)) : AnyShapeStyle(.quaternary)) }
                     }
                     .accessibilityLabel("Hidden calendars, \(hidden.count)")
+                    .accessibilityAddTraits(hidden.contains { focus == .person($0.otherID) } ? .isSelected : [])
+                }
+                ForEach(shown) { c in
+                    FocusChip(title: firstName(c), contact: engine.person(of: c), tint: c.displayColor,
+                              selected: focus == .person(c.otherID)) { choose(.person(c.otherID)) }
                 }
             }
             .padding(.horizontal, 16)
