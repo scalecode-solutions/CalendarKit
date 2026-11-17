@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 USER_ID=${1:?usage: scripts/ui-test.sh <test-account-uuid>}
-SERVER=../mvCalendar
+SERVER=${SERVER:-../mvCalendar}
 SIM=${SIM:-CalendarLab27}
 SIM_ID=$(xcrun simctl list devices available | sed -nE "s/^ +$SIM \(([0-9A-F-]{36})\).*/\1/p" | head -1)   # by id: xcodebuild sometimes misses a sim by name
 [ -n "$SIM_ID" ] || { echo "no simulator named $SIM"; exit 2; }

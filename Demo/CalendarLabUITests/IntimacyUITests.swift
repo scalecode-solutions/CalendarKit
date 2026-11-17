@@ -119,7 +119,7 @@ final class IntimacyUITests: XCTestCase {
     func openToday() {
         XCTAssert(today.waitForExistence(timeout: 5))
         today.tap()
-        XCTAssert(app.buttons["Log an intimate entry"].waitForExistence(timeout: 5), "no Intimate section in the day view")
+        XCTAssert(app.descendants(matching: .any)["dayViewHeader"].firstMatch.waitForExistence(timeout: 5), "no day view")
     }
 
     func backToMonth() {
@@ -206,30 +206,44 @@ final class IntimacyUITests: XCTestCase {
         app.buttons["All"].firstMatch.tap()
     }
 
-    /// The day view's Cycle section: log a flow for yourself, change it, and
-    /// clear it; the day says so as it goes.
+    /// An empty day shows no Intimate or Cycle card (design review
+    /// 2026-11-16); + → Log period → You → a flow writes the day and its card
+    /// appears. Logging again from + changes that day, not a second row (the
+    /// kit dedupes: the date is sealed, so the server can't). None clears it
+    /// and the card goes.
     func testLogAndClearAPeriodDay() {
         openToday()
-        let log = reveal(app.buttons["Log a period day"].firstMatch)
-        log.tap()
-        let you = app.buttons["You"].firstMatch
-        XCTAssert(you.waitForExistence(timeout: 5), "no 'You' in Log a period day")
-        you.tap()
-        let heavy = app.buttons["Heavy"].firstMatch
-        XCTAssert(heavy.waitForExistence(timeout: 5), "no flows offered")
-        heavy.tap()
-        let flow = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Flow:'")).firstMatch
-        XCTAssert(flow.waitForExistence(timeout: 5), "no flow row after logging")
-        waitFor(flow, label: "Heavy")
+        XCTAssertFalse(app.staticTexts["Nothing logged."].exists, "an empty Intimate card on an empty day")
+        XCTAssertFalse(app.buttons["Log a period day"].exists, "an empty Cycle card on an empty day")
+        XCTAssertFalse(app.descendants(matching: .any)["cycleSection"].exists, "a Cycle card on a day with nothing")
+        shot("i5a-empty-day")
+
+        func logFromPlus(_ flow: String) {
+            app.buttons["addMenu"].firstMatch.tap()
+            let log = app.buttons["Log period"].firstMatch
+            XCTAssert(log.waitForExistence(timeout: 5), "no Log period in the day view's +")
+            log.tap()
+            let you = app.buttons["You"].firstMatch
+            XCTAssert(you.waitForExistence(timeout: 5), "no 'You' under Log period")
+            you.tap()
+            let f = app.buttons[flow].firstMatch
+            XCTAssert(f.waitForExistence(timeout: 5), "no flows offered")
+            f.tap()
+        }
+        let rows = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Flow:'"))
+        logFromPlus("Heavy")
+        XCTAssert(rows.firstMatch.waitForExistence(timeout: 5), "no Cycle card after logging")
+        waitFor(rows.firstMatch, label: "Heavy")
         shot("i5-period-logged")
 
-        reveal(flow).tap()
-        app.buttons["Light"].firstMatch.tap()
-        waitFor(flow, label: "Light")
+        logFromPlus("Light")
+        waitFor(rows.firstMatch, label: "Light")
+        XCTAssertEqual(rows.count, 1, "logging the same day again made a second row")
 
-        flow.tap()
+        reveal(rows.firstMatch).tap()
         app.buttons["None"].firstMatch.tap()
-        XCTAssert(flow.waitForNonExistence(timeout: 5), "the day is still logged")
+        XCTAssert(rows.firstMatch.waitForNonExistence(timeout: 5), "the day is still logged")
+        XCTAssertFalse(app.descendants(matching: .any)["cycleSection"].exists, "the Cycle card stayed on a cleared day")
         backToMonth()
         waitFor(today, label: "period", present: false)
     }

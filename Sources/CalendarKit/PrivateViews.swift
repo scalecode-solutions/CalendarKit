@@ -272,9 +272,12 @@ struct AddMenu: View {
     let canAddEvent: Bool
     let newEvent: () -> Void
     let newPrivate: () -> Void
-    /// nil: the cycle has its own place already (the day view).
-    let logPeriod: (() -> Void)?
+    /// The day "Log period" writes to (today on the month, the day shown in
+    /// the day view); nil leaves it out.
+    let periodDay: CalDate?
     let label: AnyView
+
+    private var me: UUID { engine.config.currentUserID }
 
     var body: some View {
         Menu {
@@ -290,12 +293,52 @@ struct AddMenu: View {
                     } label: { Label("Quick log", systemImage: "bolt.heart") }
                 }
             }
-            if let logPeriod, !cycle.isEmpty {
-                Button(action: logPeriod) { Label("Log period", systemImage: "drop") }
+            if let periodDay, !cycle.isEmpty {
+                // pair (when more than one) → whose → flow. Either member may
+                // log for either; picking a flow writes the day.
+                Menu {
+                    if cycle.count == 1 {
+                        periodPeople(cycle[0], periodDay)
+                    } else {
+                        ForEach(cycle) { c in Menu(engine.displayName(c)) { periodPeople(c, periodDay) } }
+                    }
+                } label: { Label("Log period", systemImage: "drop") }
+                .accessibilityIdentifier("logPeriodMenu")
             }
         } label: { label }
         .accessibilityLabel("Add")
         .accessibilityIdentifier("addMenu")
+    }
+
+    @ViewBuilder private func periodPeople(_ pair: CalCalendar, _ day: CalDate) -> some View {
+        ForEach([me, pair.otherID], id: \.self) { person in
+            Menu(person == me ? "You" : engine.displayName(pair)) {
+                CycleFlowButtons(engine: engine, pair: pair, person: person, day: day)
+            }
+        }
+    }
+}
+
+/// Spotting · Light · Medium · Heavy for one person on one day, the current
+/// one checked, and None to take it back.
+struct CycleFlowButtons: View {
+    let engine: CalendarEngine
+    let pair: CalCalendar
+    let person: UUID
+    let day: CalDate
+
+    var body: some View {
+        let current = engine.cycle(of: person, in: pair)?.days.last { $0.date == day }
+        ForEach(CalFlow.allCases, id: \.self) { f in
+            Button {
+                engine.logCycleDay(in: pair, for: person, on: day, flow: f)
+            } label: {
+                if current?.flow == f { Label(f.title, systemImage: "checkmark") } else { Text(f.title) }
+            }
+        }
+        if let current {
+            Button("None", role: .destructive) { engine.removeCycleDay(current) }
+        }
     }
 }
 
@@ -313,31 +356,23 @@ struct PrivateDaySections: View {
     var body: some View {
         let intimate = PrivateIndex.intimatePairs(engine: engine, scope: scope)
         let cycle = PrivateIndex.cyclePairs(engine: engine, scope: scope)
+        // Only what the day holds: an empty day shows neither card, and +
+        // adds (design review, 2026-11-16).
         if scope.kind.showsPrivate {
-            if !intimate.isEmpty { intimateSection(intimate) }
-            ForEach(cycle) { c in CycleDaySection(engine: engine, pair: c, day: day, open: open) }
+            let entries = intimate.isEmpty ? [] : engine.privateEntries(from: day, through: day, zone: zone, only: scope.only)
+            if !entries.isEmpty { intimateSection(entries) }
+            ForEach(cycle.filter { CycleDaySection.hasSomething(engine: engine, pair: $0, day: day) }) { c in
+                CycleDaySection(engine: engine, pair: c, day: day)
+            }
         }
     }
 
-    private func intimateSection(_ pairs: [CalCalendar]) -> some View {
-        let entries = engine.privateEntries(from: day, through: day, zone: zone, only: scope.only)
-        let writable = pairs.filter { !$0.frozen }
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("Intimate", systemImage: "heart.fill")
-                    .font(.headline)
-                    .foregroundStyle(CycleBand.period)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer()
-                if !writable.isEmpty {
-                    Button("Log") { open(.new(day: day, pairs: writable.map(\.id))) }
-                        .cardButton()
-                        .accessibilityLabel("Log an intimate entry")
-                }
-            }
-            if entries.isEmpty {
-                Text("Nothing logged.").foregroundStyle(.secondary)
-            }
+    private func intimateSection(_ entries: [CalPrivateEntry]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Intimate", systemImage: "heart.fill")
+                .font(.headline)
+                .foregroundStyle(CycleBand.period)
+                .accessibilityAddTraits(.isHeader)
             ForEach(entries) { e in
                 Button { open(.edit(e)) } label: { PrivateEntryRow(engine: engine, entry: e, zone: zone) }
                     .buttonStyle(.plain)
@@ -423,20 +458,24 @@ struct PrivateEntryRow: View {
     }
 }
 
-/// One pair's cycle on a day: whose cycle, what the day is, and the flow
-/// logged, changed in place. Either member may log for either of them.
+/// One pair's cycle on a day, shown only when it holds something: a person's
+/// logged day (with its flow, changed in place), or else one plain line for
+/// an estimate ("Period expected"). Logging a new day is + → Log period.
 struct CycleDaySection: View {
     let engine: CalendarEngine
     let pair: CalCalendar
     let day: CalDate
-    let open: (PrivateSheet) -> Void
     @State private var legend = false
 
     private var me: UUID { engine.config.currentUserID }
 
+    /// Whether the day has a logged day or an estimate for anyone tracked.
+    @MainActor static func hasSomething(engine: CalendarEngine, pair: CalCalendar, day: CalDate) -> Bool {
+        engine.cyclePeople(in: pair).contains { engine.cycle(of: $0, in: pair)?.info(on: day).kind != nil }
+    }
+
     var body: some View {
-        let tracked = engine.cyclePeople(in: pair)
-        let untracked = [me, pair.otherID].filter { !tracked.contains($0) }
+        let shown = engine.cyclePeople(in: pair).filter { engine.cycle(of: $0, in: pair)?.info(on: day).kind != nil }
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Label("Cycle", systemImage: "drop.fill")
@@ -447,18 +486,7 @@ struct CycleDaySection: View {
                 Button { legend = true } label: { Image(systemName: "info.circle") }
                     .accessibilityLabel("What the colors mean")
             }
-            ForEach(tracked, id: \.self) { person in personRow(person) }
-            if !pair.frozen && !untracked.isEmpty {
-                Menu {
-                    ForEach(untracked, id: \.self) { p in
-                        Menu(name(p)) { flowButtons(p, current: nil) }
-                    }
-                } label: {
-                    Label(tracked.isEmpty ? "Log a period day" : "Track someone else", systemImage: "plus.circle")
-                        .font(.subheadline.weight(.medium))
-                }
-                .accessibilityIdentifier("logPeriodMenu")
-            }
+            ForEach(shown, id: \.self) { person in personRow(person) }
             Text(CycleLegend.disclaimer).font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -471,49 +499,48 @@ struct CycleDaySection: View {
 
     private func personRow(_ person: UUID) -> some View {
         let est = engine.cycle(of: person, in: pair)
-        let info = est?.info(on: day)
+        let kind = est?.info(on: day).kind
         let logged = est?.days.last { $0.date == day }
         return VStack(alignment: .leading, spacing: 6) {
             Text(name(person)).font(.subheadline.weight(.semibold))
-            Text(describe(info)).font(.body)
-                .fixedSize(horizontal: false, vertical: true)
-            if !pair.frozen {
-                Menu {
-                    flowButtons(person, current: logged)
-                } label: {
-                    Label(logged.map { "Flow: \($0.flow.title)" } ?? "Log flow", systemImage: logged == nil ? "plus" : "drop.fill")
-                        .font(.subheadline.weight(.medium))
+            if let logged {
+                Text(logged.flow == .spotting ? "Spotting" : "Period").font(.body)
+                if !pair.frozen {
+                    Menu {
+                        CycleFlowButtons(engine: engine, pair: pair, person: person, day: day)
+                    } label: {
+                        Label("Flow: \(logged.flow.title)", systemImage: "drop.fill")
+                            .font(.subheadline.weight(.medium))
+                    }
+                    .accessibilityIdentifier("flowMenu")
                 }
-                .accessibilityIdentifier("flowMenu")
+            } else if let kind {
+                Label(CycleDaySection.estimate(kind), systemImage: CycleDaySection.symbol(kind))
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("cycleEstimate")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
     }
 
-    @ViewBuilder private func flowButtons(_ person: UUID, current: CalCycleDay?) -> some View {
-        ForEach(CalFlow.allCases, id: \.self) { f in
-            Button {
-                engine.logCycleDay(in: pair, for: person, on: day, flow: f)
-            } label: {
-                if current?.flow == f { Label(f.title, systemImage: "checkmark") } else { Text(f.title) }
-            }
-        }
-        if let current {
-            Button("None", role: .destructive) { engine.removeCycleDay(current) }
+    /// "Period expected · estimate".
+    static func estimate(_ k: CalCycleDayInfo.Kind) -> String {
+        let s = PrivateMarks.spoken(k)
+        return s.prefix(1).uppercased() + s.dropFirst() + " · estimate"
+    }
+
+    static func symbol(_ k: CalCycleDayInfo.Kind) -> String {
+        switch k {
+        case .logged: "drop.fill"
+        case .predictedPeriod: "drop"
+        case .fertile: "circle.dotted"
         }
     }
 
     private func name(_ person: UUID) -> String {
         person == me ? "You" : engine.displayName(pair)
-    }
-
-    private func describe(_ info: CalCycleDayInfo?) -> String {
-        guard let info else { return "Nothing logged yet." }
-        var parts: [String] = []
-        if let d = info.cycleDay { parts.append("Day \(d) of the cycle") }
-        if let k = info.kind { parts.append(PrivateMarks.spoken(k).prefix(1).uppercased() + PrivateMarks.spoken(k).dropFirst()) }
-        return parts.isEmpty ? "Nothing logged yet." : parts.joined(separator: " · ")
     }
 }
 
@@ -531,7 +558,7 @@ extension CalFlow {
 /// What the grid's marks mean, and what the estimates are (plan decisions 9,
 /// 11 and 12).
 struct CycleLegend: View {
-    static let disclaimer = "Estimates from your entries. Not a medical device and not a contraceptive method."
+    static let disclaimer = "Estimates only. Not a medical device or birth control."
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -554,7 +581,7 @@ struct CycleLegend: View {
                 } header: {
                     Text("Cycle")
                 } footer: {
-                    Text("Ovulation is estimated as 14 days before the next period, and the fertile window as the 5 days before it. \(CycleLegend.disclaimer)")
+                    Text(CycleLegend.disclaimer)
                 }
             }
             .navigationTitle("What the colors mean")

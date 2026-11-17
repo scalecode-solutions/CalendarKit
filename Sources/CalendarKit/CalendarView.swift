@@ -183,7 +183,7 @@ public struct CalendarView: View {
                             privateSheet = .new(day: today, pairs: PrivateIndex.intimatePairs(engine: engine, scope: s)
                                 .filter { !$0.frozen }.map(\.id))
                         },
-                        logPeriod: { openDay = today },
+                        periodDay: today,
                         label: AnyView(plusGlyph))
                     .buttonStyle(.glassProminent)
                     .buttonBorderShape(.circle)

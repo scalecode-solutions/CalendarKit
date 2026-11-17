@@ -70,16 +70,18 @@ struct DayView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 let intimate = PrivateIndex.intimatePairs(engine: engine, scope: scope).filter { !$0.frozen }
-                if intimate.isEmpty {
+                let cycle = PrivateIndex.cyclePairs(engine: engine, scope: scope).filter { !$0.frozen }
+                if intimate.isEmpty && cycle.isEmpty {
                     Button { editor = .new(day, in: inPair) } label: { Image(systemName: "plus") }
                         .accessibilityLabel(appearance.newEvent)
                         .disabled(!canAdd)
                 } else {
-                    // The cycle is logged in its section here, so no Log period.
-                    AddMenu(engine: engine, appearance: appearance, intimate: intimate, cycle: [],
+                    // The private cards show only what the day holds, so +
+                    // is where an entry or a period day is added.
+                    AddMenu(engine: engine, appearance: appearance, intimate: intimate, cycle: cycle,
                             canAddEvent: canAdd, newEvent: { editor = .new(day, in: inPair) },
                             newPrivate: { privateSheet = .new(day: day, pairs: intimate.map(\.id)) },
-                            logPeriod: nil, label: AnyView(Image(systemName: "plus")))
+                            periodDay: day, label: AnyView(Image(systemName: "plus")))
                 }
             }
         }
