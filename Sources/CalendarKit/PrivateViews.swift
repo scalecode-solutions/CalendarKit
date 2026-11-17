@@ -159,27 +159,81 @@ struct DashedRule: View {
     }
 }
 
-/// A day's hearts in the strip above its number (plan decisions 6 and 9):
-/// one per author (one centered; two, one at each side), in the partner's color or
-/// the author's, hollow while who is still unset. A count of more than one
-/// sits inside its heart. Each has a halo in the card's color, so a heart
-/// reads on any cycle band whatever color it is (Torsion's review).
-struct HeartMarks: View {
+/// A day's marks in the strip above its number (plan decisions 6 and 9,
+/// MVCALE-50): a period drop and a heart per author. At most two marks fit
+/// a cell at the largest text sizes (a mark with its halo is about 19pt of
+/// a 40pt cell), so: one mark centered; two at the sides, the drop leading;
+/// and a drop with two authors' hearts shows the drop and one heart holding
+/// the day's total, in the color of whoever logged more (the viewer's on a
+/// tie). VoiceOver still says every count (PrivateMarks.spoken).
+struct DayMarks: View {
     let hearts: [CalHeart]
+    let cycle: CalCycleDayInfo.Kind?
+    let me: UUID
     let size: CGFloat
 
     var body: some View {
-        // One heart centered over the number; two, one at each side.
+        let drop = DropMark.kind(cycle)
+        let shown = DayMarks.hearts(hearts, besideADrop: drop != nil, me: me)
         HStack(alignment: .top, spacing: 0) {
-            if hearts.count > 1 {
-                HeartMark(heart: hearts[0], size: size)
+            switch (drop, shown.count) {
+            case (nil, 0):
+                EmptyView()
+            case (nil, 1):
+                HeartMark(heart: shown[0], size: size).frame(maxWidth: .infinity)
+            case (nil, _):
+                HeartMark(heart: shown[0], size: size)
                 Spacer(minLength: 0)
-                HeartMark(heart: hearts[1], size: size)
-            } else if let only = hearts.first {
-                HeartMark(heart: only, size: size).frame(maxWidth: .infinity)
+                HeartMark(heart: shown[1], size: size)
+            case (let d?, 0):
+                DropMark(kind: d, size: size).frame(maxWidth: .infinity)
+            case (let d?, _):
+                DropMark(kind: d, size: size)
+                Spacer(minLength: 0)
+                HeartMark(heart: shown[0], size: size)
             }
         }
         .accessibilityHidden(true)
+    }
+
+    /// The hearts that fit: all of them (at most two authors in a pair), or
+    /// beside a drop, one holding the day's total.
+    static func hearts(_ hearts: [CalHeart], besideADrop: Bool, me: UUID) -> [CalHeart] {
+        guard besideADrop, hearts.count > 1 else { return hearts }
+        let lead = hearts.max { a, b in
+            a.count != b.count ? a.count < b.count : (a.author == me ? 0 : 1) > (b.author == me ? 0 : 1)
+        }!
+        return [CalHeart(author: lead.author, color: lead.color, count: hearts.reduce(0) { $0 + $1.count },
+                         hollow: hearts.allSatisfy(\.hollow))]
+    }
+}
+
+/// A period drop (design review, MVCALE-50): filled for a logged day (fainter for
+/// spotting), outlined for an expected one, with the hearts' halo.
+struct DropMark: View {
+    enum Kind: Equatable { case logged, spotting, expected }
+    let kind: Kind
+    let size: CGFloat
+    @Environment(\.colorScheme) private var scheme
+
+    static func kind(_ k: CalCycleDayInfo.Kind?) -> Kind? {
+        switch k {
+        case .logged(.spotting): .spotting
+        case .logged: .logged
+        case .predictedPeriod: .expected
+        default: nil
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Image(systemName: "drop.fill")
+                .font(.system(size: size * 1.3, weight: .black))
+                .foregroundStyle(Color(uiColor: .systemBackground).opacity(scheme == .dark ? 0.8 : 1))
+            Image(systemName: kind == .expected ? "drop" : "drop.fill")
+                .font(.system(size: size, weight: .bold))
+                .foregroundStyle(CycleBand.period.opacity(kind == .spotting ? 0.5 : 1))
+        }
     }
 }
 
@@ -486,8 +540,12 @@ struct CycleLegend: View {
                 Section("Intimate") {
                     row(Image(systemName: "heart.fill").foregroundStyle(.pink), "An entry. Its color is the partner's, else whoever logged it.")
                     row(Image(systemName: "heart").foregroundStyle(.pink), "Who isn't filled in yet (a quick log).")
+                    row(HeartMark(heart: CalHeart(author: UUID(), color: .pink, count: 2, hollow: false), size: 16),
+                        "Two or more that day: the count is inside the heart.")
                 }
                 Section {
+                    row(DropMark(kind: .logged, size: 16), "A period day, logged (fainter for spotting)")
+                    row(DropMark(kind: .expected, size: 16), "A period day, expected")
                     row(band(.logged(.medium)), "Period, logged")
                     row(band(.logged(.spotting)), "Spotting, logged")
                     row(band(.predictedPeriod), "Period, expected")

@@ -102,6 +102,33 @@ struct PrivateEntryTests {
         #expect(PrivateEntryRow.names([], partners: [a]) == "Someone")
     }
 
+    /// The grid's strip holds two marks at most (MVCALE-50): beside a period
+    /// drop, two authors' hearts become one with the day's total, in the color
+    /// of whoever logged more (the viewer's own on a tie); without a drop,
+    /// both stay.
+    @Test func aDropAndTwoAuthorsShowOneHeartWithTheTotal() {
+        let me = UUID(), them = UUID()
+        let mine = CalHeart(author: me, color: .blue, count: 1, hollow: false)
+        let theirs = CalHeart(author: them, color: .teal, count: 2, hollow: true)
+        #expect(DayMarks.hearts([mine, theirs], besideADrop: false, me: me) == [mine, theirs])
+        let merged = DayMarks.hearts([mine, theirs], besideADrop: true, me: me)
+        #expect(merged.count == 1 && merged[0].count == 3 && merged[0].color == .teal && !merged[0].hollow)
+        let tie = DayMarks.hearts([CalHeart(author: them, color: .teal, count: 1, hollow: false), mine],
+                                  besideADrop: true, me: me)
+        #expect(tie.count == 1 && tie[0].color == .blue && tie[0].count == 2)
+        #expect(DayMarks.hearts([mine], besideADrop: true, me: me) == [mine])
+    }
+
+    /// Which drop a day gets: filled for a logged period, fainter for spotting,
+    /// outlined for an expected one, none in the fertile window.
+    @Test func dropsFollowTheCycleMark() {
+        #expect(DropMark.kind(.logged(.heavy)) == .logged)
+        #expect(DropMark.kind(.logged(.spotting)) == .spotting)
+        #expect(DropMark.kind(.predictedPeriod) == .expected)
+        #expect(DropMark.kind(.fertile(ovulation: true)) == nil)
+        #expect(DropMark.kind(nil) == nil)
+    }
+
     @Test func aQuickLogIsHollowUntilWhoIsSet() async throws {
         let (engine, server, own) = makeEngine()
         server.externalConsent(own, true)
