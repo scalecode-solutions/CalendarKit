@@ -194,4 +194,23 @@ struct CycleEstimatorTests {
         #expect(e.starts == [CalDate(2026, 9, 1), CalDate(2026, 9, 29)])
         #expect(e.periodLength == 5) // (4 + 5) / 2, rounded
     }
+
+    /// Leaf's review: an end ends a period however it began. Flows then
+    /// Ended; a flow, Started the next day, then Ended; Ended right after a run.
+    @Test func anEndEndsAPeriodThatBeganWithAFlow() {
+        var e = CalCycleEstimator(days: [mark(11, 1, flow: .medium), mark(11, 2, flow: .heavy), mark(11, 4, ends: true)], settings: nil)
+        #expect(e.periods == [CalPeriod(start: CalDate(2026, 11, 1), end: CalDate(2026, 11, 4), marked: false)])
+        #expect(e.periodLength == 4)
+        #expect(e.info(on: CalDate(2026, 11, 3)).kind == .inPeriod)
+
+        e = CalCycleEstimator(days: [mark(11, 1, flow: .medium), mark(11, 2, starts: true), mark(11, 5, ends: true)], settings: nil)
+        #expect(e.periods == [CalPeriod(start: CalDate(2026, 11, 1), end: CalDate(2026, 11, 5), marked: true)])
+        #expect(e.periodLength == 5)
+
+        e = CalCycleEstimator(days: [mark(11, 1, flow: .heavy), mark(11, 2, flow: .light), mark(11, 7, ends: true)], settings: nil)
+        #expect(e.periods.first?.end == CalDate(2026, 11, 7))
+        // A flow-only run with no end still ends at its last bleeding day.
+        e = CalCycleEstimator(days: [mark(11, 1, flow: .heavy), mark(11, 2, flow: .light)], settings: nil)
+        #expect(e.periods == [CalPeriod(start: CalDate(2026, 11, 1), end: CalDate(2026, 11, 2), marked: false)])
+    }
 }

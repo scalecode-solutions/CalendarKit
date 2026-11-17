@@ -143,38 +143,48 @@ public struct CalCycleEstimator: Sendable {
         self.settings = settings
     }
 
-    /// Each period, oldest first (MVCALE-52). A marked start opens one; it
-    /// runs to the first marked end on or after it, within 15 days, else it's
-    /// still open. A start inside a period continues it, and an end with no
-    /// start before it is ignored. Days logged without marks (before marks
-    /// existed, or flow alone) still make periods from their runs: spotting
-    /// never starts one, a bleeding day within 3 days of the last continues
-    /// it. Across both, a start less than 15 days after the previous one is
-    /// mid-cycle bleeding, not a new period.
+    /// Each period, oldest first (MVCALE-52), from one pass over the days:
+    /// - A period begins at a "Period started" mark or at a bleeding day
+    ///   (spotting never begins one), unless it's less than 15 days after the
+    ///   last period began (mid-cycle bleeding, not a new period).
+    /// - It goes on through bleeding days at most 3 days apart; a "Period
+    ///   started" mark inside it marks it rather than beginning another.
+    /// - A "Period ended" mark within 15 days of its start ends it, whether it
+    ///   began with a mark or with a flow (Leaf's review); an end with no
+    ///   period before it is ignored.
+    /// - Otherwise a marked period stays open until ended, and an unmarked
+    ///   one (flows alone, or days logged before marks existed) ends at its
+    ///   last bleeding day.
     public var periods: [CalPeriod] {
-        let ends = days.filter(\.ends).map(\.date)
-        var marked: [CalPeriod] = []
-        for d in days where d.starts {
-            if let p = marked.last, p.covers(d.date) || p.start.days(to: d.date) < 15 { continue }
-            let end = ends.first { $0 >= d.date && d.date.days(to: $0) < 15 }
-            marked.append(CalPeriod(start: d.date, end: end, marked: true))
-        }
-        // Runs of unmarked bleeding days outside the marked periods.
-        var runs: [CalPeriod] = []
-        var runStart: CalDate?, last: CalDate?
-        for d in days where !d.starts && !d.ends && (d.flow?.startsAPeriod ?? false)
-            && !marked.contains(where: { $0.covers(d.date) }) {
-            if let l = last, l.days(to: d.date) <= 3 { last = d.date; continue }
-            if let s0 = runStart, let l = last { runs.append(CalPeriod(start: s0, end: l, marked: false)) }
-            runStart = d.date
-            last = d.date
-        }
-        if let s0 = runStart, let l = last { runs.append(CalPeriod(start: s0, end: l, marked: false)) }
         var out: [CalPeriod] = []
-        for p in (marked + runs).sorted(by: { $0.start < $1.start }) {
-            if let prev = out.last, prev.start.days(to: p.start) < 15 { continue }
-            out.append(p)
+        var cur: (start: CalDate, last: CalDate, marked: Bool)?
+        func close(end: CalDate?) {
+            guard let c = cur else { return }
+            out.append(CalPeriod(start: c.start, end: end ?? (c.marked ? nil : c.last), marked: c.marked))
+            cur = nil
         }
+        for d in days {
+            let bleeding = d.flow?.startsAPeriod ?? false
+            if let c = cur {
+                let inRun = c.marked ? c.start.days(to: d.date) < 15 : c.last.days(to: d.date) <= 3
+                if d.ends && c.start.days(to: d.date) < 15 && (inRun || !bleeding) {
+                    if bleeding || d.starts { cur?.last = d.date }
+                    close(end: d.date)
+                    continue
+                }
+                if inRun {
+                    if bleeding { cur?.last = d.date }
+                    if d.starts { cur?.marked = true }
+                    continue
+                }
+                if bleeding || d.starts { close(end: nil) } else { continue }
+            }
+            guard bleeding || d.starts else { continue } // an end, or spotting, on its own
+            if let prev = out.last, prev.start.days(to: d.date) < 15 { continue }
+            cur = (d.date, d.date, d.starts)
+            if d.ends { close(end: d.date) }
+        }
+        close(end: nil)
         return out
     }
 
