@@ -118,14 +118,21 @@ public enum CalRecurrenceExpander {
         }
     }
 
+    /// The month `n` months from (y, m), n negative too. Counted in whole
+    /// months from year 0 and floored: Swift's / and % round toward zero, so
+    /// the old `t % 12 + 1` gave month 0 for January minus one, and the
+    /// calendar froze going back from January (daysIn never found a valid day
+    /// in month 0).
     static func addMonths(_ y: Int, _ m: Int, _ n: Int) -> (Int, Int) {
-        let t = m - 1 + n
-        return (y + t / 12, t % 12 + 1)
+        let t = y * 12 + (m - 1) + n
+        let year = t >= 0 ? t / 12 : (t - 11) / 12
+        return (year, t - year * 12 + 1)
     }
 
+    /// The days in a month. Never loops forever: past 28 it stops looking.
     static func daysIn(_ y: Int, _ m: Int) -> Int {
         var d = 31
-        while !CalDate(y, m, d).isValid { d -= 1 }
+        while d > 28 && !CalDate(y, m, d).isValid { d -= 1 }
         return d
     }
 

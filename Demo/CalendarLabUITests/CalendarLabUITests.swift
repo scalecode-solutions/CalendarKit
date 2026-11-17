@@ -402,6 +402,24 @@ final class CalendarLabUITests: XCTestCase {
         back()
     }
 
+    /// Forward into a January, then back to December: going back from
+    /// January froze the app (month 0, design review 2026-11-16).
+    func testMonthsBackAcrossTheYear() throws {
+        waitForCalendar()
+        let next = app.buttons["Next month"], prev = app.buttons["Previous month"]
+        let january = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'January'")).firstMatch
+        for _ in 0..<13 where !january.exists { next.tap() }
+        XCTAssert(january.waitForExistence(timeout: 3), "never reached a January")
+        prev.tap()
+        let december = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'December'")).firstMatch
+        XCTAssert(december.waitForExistence(timeout: 5), "going back from January didn't land on December")
+        next.tap()
+        XCTAssert(january.waitForExistence(timeout: 5), "and forward again")
+        app.buttons["Today"].firstMatch.tap()
+        XCTAssert(app.buttons["Next month"].waitForExistence(timeout: 5))
+        shot("m1-back-across-the-year")
+    }
+
     /// MVCALE-32: "Opens on" in the calendar settings. A fixed choice wins
     /// over the remembered switch; Last used (the default) remembers it.
     func testOpensOnSetting() throws {

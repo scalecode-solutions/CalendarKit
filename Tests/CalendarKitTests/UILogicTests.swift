@@ -21,6 +21,24 @@ struct UILogicTests {
         #expect(m.previous == (2026, 10) && MonthLayout(year: 2026, month: 12, firstWeekday: 1).next == (2027, 1))
     }
 
+    /// Going back from January lands on December of the year before. It
+    /// gave month 0 (Swift's % keeps the sign), and the month grid then
+    /// looped forever counting month 0's days: the calendar froze going back
+    /// from January 2027 to December 2026.
+    @Test func monthsBackAcrossTheYear() {
+        #expect(CalRecurrenceExpander.addMonths(2027, 1, -1) == (2026, 12))
+        #expect(CalRecurrenceExpander.addMonths(2026, 12, 1) == (2027, 1))
+        #expect(CalRecurrenceExpander.addMonths(2027, 1, -13) == (2025, 12))
+        #expect(CalRecurrenceExpander.addMonths(2026, 3, -14) == (2025, 1))
+        #expect(CalRecurrenceExpander.addMonths(2026, 3, -2) == (2026, 1))
+        #expect(CalRecurrenceExpander.addMonths(2026, 3, 22) == (2028, 1))
+        #expect(MonthLayout(year: 2027, month: 1, firstWeekday: 1).previous == (2026, 12))
+        let dec = MonthLayout(year: 2026, month: 12, firstWeekday: 1)
+        #expect(dec.weeks.flatMap { $0 }.contains(CalDate(2026, 12, 31)))
+        // A month that doesn't exist can't hang the grid.
+        #expect(CalRecurrenceExpander.daysIn(2027, 0) == 28)
+    }
+
     @Test func weekdaySymbolsRotate() {
         let en = Locale(identifier: "en_US")
         #expect(MonthLayout.weekdaySymbols(firstWeekday: 2, locale: en) == ["M", "T", "W", "T", "F", "S", "S"])
