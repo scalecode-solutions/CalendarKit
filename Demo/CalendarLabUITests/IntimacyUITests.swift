@@ -108,6 +108,9 @@ final class IntimacyUITests: XCTestCase {
             field.typeText(partner)
             app.buttons["privacy.partner.add"].tap()
             XCTAssert(app.buttons["privacy.partner.\(partner)"].firstMatch.waitForExistence(timeout: 5), "the partner wasn't added")
+            // At the largest text the keyboard covers the default's row.
+            if app.keyboards.count > 0 { app.typeText("\n") }
+            XCTAssert(app.keyboards.firstMatch.waitForNonExistence(timeout: 3), "the keyboard stayed up")
             reveal(app.buttons["privacy.partner.default"].firstMatch).tap()
             let choice = app.buttons[partner].firstMatch
             XCTAssert(choice.waitForExistence(timeout: 5), "the partner isn't offered as the default")

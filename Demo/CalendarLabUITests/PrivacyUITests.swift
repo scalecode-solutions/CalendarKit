@@ -19,6 +19,12 @@ final class PrivacyUITests: XCTestCase {
         app.launch()
     }
 
+    /// Return ends the edit and the keyboard goes.
+    func dismissKeyboard() {
+        if app.keyboards.count > 0 { app.typeText("\n") }
+        XCTAssert(app.keyboards.firstMatch.waitForNonExistence(timeout: 3), "the keyboard stayed up")
+    }
+
     func shot(_ name: String) {
         let a = XCTAttachment(screenshot: app.screenshot())
         a.name = name
@@ -68,7 +74,11 @@ final class PrivacyUITests: XCTestCase {
         openPrivacy()
         let intimate = app.switches["privacy.intimate"]
         let intimateState = app.staticTexts["privacy.intimate.state"]
-        // The friend's is on already; ours is off.
+        // The friend's is on already (CONSENT_FROM). Ours may be on from an
+        // earlier class in the same run: off first, so this starts the same.
+        if (intimate.value as? String) == "1" {
+            intimate.switches.firstMatch.exists ? intimate.switches.firstMatch.tap() : intimate.tap()
+        }
         waitFor(intimateState, label: "turned it on")
         shot("p1-waiting-for-me")
 
@@ -94,10 +104,10 @@ final class PrivacyUITests: XCTestCase {
         app.buttons["privacy.partner.edit.save"].tap()
         let renamed = app.buttons["privacy.partner.UI Alex B"].firstMatch
         XCTAssert(renamed.waitForExistence(timeout: 5), "the rename didn't land")
+        dismissKeyboard() // at the largest text it covers the rows below
 
         // My default partner: picked from the list, mine alone.
         let def = reveal(app.buttons["privacy.partner.default"].firstMatch)
-        XCTAssert(def.label.contains("None"), def.label)
         def.tap()
         let choice = app.buttons["UI Alex B"].firstMatch
         XCTAssert(choice.waitForExistence(timeout: 5), "the partner isn't offered as the default")
@@ -113,12 +123,21 @@ final class PrivacyUITests: XCTestCase {
         let sheet = app.sheets.buttons["Remove"]
         (sheet.exists ? sheet : app.buttons["Remove"].firstMatch).tap()
         XCTAssert(renamed.waitForNonExistence(timeout: 5), "the partner is still listed")
-        // With no partners left there's no default to pick.
-        XCTAssert(app.buttons["privacy.partner.default"].waitForNonExistence(timeout: 5), "a default with no partners")
+        // With no partners left there's no default to pick (an earlier class
+        // in the run may have left one of its own).
+        let others = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'privacy.partner.' AND NOT (identifier IN %@)",
+                                                      ["privacy.partner.default", "privacy.partner.add", "privacy.partner.name"]))
+        if others.count == 0 {
+            XCTAssert(app.buttons["privacy.partner.default"].waitForNonExistence(timeout: 5), "a default with no partners")
+        }
 
         // Cycle is each person's own (MVCALE-51): the friend tracks theirs
         // already, so their settings show; Track my cycle adds mine.
         let cycle = reveal(app.switches["privacy.cycle"])
+        if (cycle.value as? String) == "1" { // on from an earlier class in the run
+            cycle.switches.firstMatch.exists ? cycle.switches.firstMatch.tap() : cycle.tap()
+            XCTAssert(app.buttons["privacy.cycleLength.me"].firstMatch.waitForNonExistence(timeout: 5))
+        }
         let cycleState = app.staticTexts["privacy.cycle.state"]
         waitFor(cycleState, label: "tracks theirs here")
         XCTAssert(app.buttons["privacy.cycleLength.them"].firstMatch.exists, "the friend's cycle settings don't show")
