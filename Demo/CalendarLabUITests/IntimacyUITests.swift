@@ -291,9 +291,43 @@ final class IntimacyUITests: XCTestCase {
         XCTAssertEqual(rows.count, 1, "logging the same day again made a second row")
 
         reveal(rows.firstMatch).tap()
-        app.buttons["None"].firstMatch.tap()
+        app.buttons["No flow"].firstMatch.tap()
         XCTAssert(rows.firstMatch.waitForNonExistence(timeout: 5), "the day is still logged")
         XCTAssertFalse(app.descendants(matching: .any)["cycleSection"].exists, "the Cycle card stayed on a cleared day")
+        backToMonth()
+        waitFor(today, label: "period", present: false)
+    }
+
+    /// Two taps a period (MVCALE-52): + → Log period → You → Period started
+    /// makes it a period day with no flow, offering Ended today; ending it
+    /// takes that away; taking both marks back clears the day.
+    func testMarkAPeriodStartedAndEnded() {
+        openToday()
+        func fromPlus(_ item: String) {
+            app.buttons["addMenu"].firstMatch.tap()
+            let log = app.buttons["Log period"].firstMatch
+            XCTAssert(log.waitForExistence(timeout: 5), "no Log period in the day view's +")
+            log.tap()
+            let you = app.buttons["You"].firstMatch
+            XCTAssert(you.waitForExistence(timeout: 5), "no 'You' under Log period")
+            you.tap()
+            let i = app.buttons[item].firstMatch
+            XCTAssert(i.waitForExistence(timeout: 5), "no \(item) under You")
+            i.tap()
+        }
+        fromPlus("Period started")
+        let started = app.staticTexts["Period · started"].firstMatch
+        XCTAssert(started.waitForExistence(timeout: 5), "the day doesn't say the period started")
+        let ended = app.buttons["endedToday"].firstMatch
+        XCTAssert(reveal(ended).exists, "no Ended today on an open period's day")
+        shot("i7-period-started")
+        ended.tap()
+        XCTAssert(ended.waitForNonExistence(timeout: 5), "Ended today stayed after ending it")
+        shot("i8-period-ended")
+        // Take both marks back: the day has nothing left, so it goes.
+        fromPlus("Period ended")
+        fromPlus("Period started")
+        XCTAssert(app.descendants(matching: .any)["cycleSection"].waitForNonExistence(timeout: 5), "a Cycle card on a cleared day")
         backToMonth()
         waitFor(today, label: "period", present: false)
     }

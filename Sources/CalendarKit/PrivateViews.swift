@@ -343,17 +343,20 @@ struct CycleFlowButtons: View {
         let current = est?.days.last { $0.date == day }
         let info = est?.info(on: day, today: CalDate(Date(), in: .current))
         // The two taps a period (MVCALE-52); the flow below is optional.
+        // Started: on any day not inside an open period (or already its start).
+        if info?.openPeriod == nil || current?.starts == true {
+            Button {
+                engine.markPeriodStart(in: pair, for: person, on: day, !(current?.starts ?? false))
+            } label: {
+                if current?.starts == true { Label("Period started", systemImage: "checkmark") } else { Text("Period started") }
+            }
+        }
+        // Ended: inside an open period (or already its end).
         if info?.openPeriod != nil || current?.ends == true {
             Button {
                 engine.markPeriodEnd(in: pair, for: person, on: day, !(current?.ends ?? false))
             } label: {
                 if current?.ends == true { Label("Period ended", systemImage: "checkmark") } else { Text("Period ended") }
-            }
-        } else {
-            Button {
-                engine.markPeriodStart(in: pair, for: person, on: day, !(current?.starts ?? false))
-            } label: {
-                if current?.starts == true { Label("Period started", systemImage: "checkmark") } else { Text("Period started") }
             }
         }
         ForEach(CalFlow.allCases, id: \.self) { f in

@@ -177,6 +177,51 @@ struct PrivateEntryTests {
         #expect(engine.notices.count == 2)
     }
 
+    /// An entry from before owners naming the other person's partner stays
+    /// editable (grandfathered); dropping that partner and adding it back is
+    /// refused, since it's no longer one the entry names.
+    @Test func anOldEntryNamingTheirPartnerStaysEditable() async throws {
+        let (engine, server, own) = makeEngine()
+        server.externalConsent(own, true)
+        await engine.refresh()
+        let pair = try #require(engine.calendar(own))
+        engine.setConsent(pair, .intimate, true)
+        await engine.refresh()
+        let me = engine.config.currentUserID
+        let riley = CalPartner(calendarID: own, ownerID: pair.otherID, name: "Riley")
+        server.externalPartner(riley)
+        var c = CalPrivateContent(at: nov16)
+        c.partnerIDs = [riley.id]
+        let old = CalPrivateEntry(calendarID: own, content: c, createdBy: me)
+        server.set { s in
+            let r = (s.privateRev[own] ?? 0) + 1
+            s.privateRev[own] = r
+            var e = old
+            e.rev = r
+            s.privates[old.id] = e
+        }
+        await engine.refresh()
+        var e = try #require(engine.privateEntries(from: CalDate(2026, 11, 16), through: CalDate(2026, 11, 16), zone: chicago).first)
+        e.content.notes = "kept"
+        engine.savePrivate(e)
+        await engine.refresh()
+        #expect(engine.notices.isEmpty)
+        #expect(server.get { $0.privates[old.id]?.content.notes } == "kept")
+        // Dropped, then added back: refused.
+        e = try #require(engine.privateEntries(from: CalDate(2026, 11, 16), through: CalDate(2026, 11, 16), zone: chicago).first)
+        e.content.partnerIDs = []
+        e.content.solo = true
+        engine.savePrivate(e)
+        await engine.refresh()
+        e = try #require(engine.privateEntries(from: CalDate(2026, 11, 16), through: CalDate(2026, 11, 16), zone: chicago).first)
+        e.content.solo = false
+        e.content.partnerIDs = [riley.id]
+        engine.savePrivate(e)
+        await engine.refresh()
+        #expect(engine.notices.count == 1)
+        #expect(server.get { $0.privates[old.id]?.content.solo } == true)
+    }
+
     @Test func aQuickLogIsHollowUntilWhoIsSet() async throws {
         let (engine, server, own) = makeEngine()
         server.externalConsent(own, true)
