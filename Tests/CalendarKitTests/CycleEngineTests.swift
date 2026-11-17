@@ -45,29 +45,34 @@ struct CycleEngineTests {
         }
     }
 
-    @Test func nothingIsKeptOrShownUntilBothConsent() async throws {
+    /// Cycle tracking is each person's own (MVCALE-51): mine shows as soon
+    /// as I turn it on, whatever the other's switch says; theirs only once
+    /// they turn theirs on, and a day for them before that isn't even sent.
+    @Test func aPersonsCycleShowsOnceTheyTrackIt() async throws {
         let (engine, server, own) = makeEngine()
         await engine.refresh()
         engine.setConsent(try #require(engine.calendar(own)), .cycle, true)
         await engine.refresh()
         let cal = try #require(engine.calendar(own))
-        #expect(cal.cycleMine && !cal.cycleOn)
-        #expect(engine.cycle(of: me(engine), in: cal) == nil)
-        // A day logged now is refused (the other hasn't consented): gone, with one notice.
+        let them = cal.otherID
+        #expect(cal.cycleMine && !cal.cycleTheirs && cal.cycleOn)
+        #expect(engine.cyclePeople(in: cal) == [me(engine)])
+        #expect(engine.cycle(of: them, in: cal) == nil)
         engine.logCycleDay(in: cal, for: me(engine), on: CalDate(2026, 11, 1), flow: .heavy)
+        engine.logCycleDay(in: cal, for: them, on: CalDate(2026, 11, 1), flow: .heavy)
         await engine.refresh()
-        #expect(server.get(\.cycleDays).isEmpty)
-        #expect(engine.notices.count == 1)
-        #expect(engine.pendingCount == 0)
+        #expect(server.get { $0.cycleDays.values.map(\.personID) } == [me(engine)])
+        #expect(engine.notices.isEmpty && engine.pendingCount == 0)
+        #expect(engine.cycle(of: me(engine), in: cal)?.starts == [CalDate(2026, 11, 1)])
+        // They turn theirs on: both of us now, and a day for them goes through.
         server.externalCycleConsent(own, true)
         await engine.refresh()
-        let on = try #require(engine.calendar(own))
-        #expect(on.cycleOn)
-        #expect(engine.cycle(of: me(engine), in: on)?.starts.isEmpty == true) // the refused day didn't linger
-        engine.logCycleDay(in: on, for: me(engine), on: CalDate(2026, 11, 1), flow: .heavy)
+        let both = try #require(engine.calendar(own))
+        #expect(engine.cyclePeople(in: both) == [me(engine), them])
+        engine.logCycleDay(in: both, for: them, on: CalDate(2026, 11, 2), flow: .light)
         await engine.refresh()
-        #expect(server.get(\.cycleDays).count == 1)
-        #expect(engine.cycle(of: me(engine), in: on)?.starts == [CalDate(2026, 11, 1)])
+        #expect(server.get(\.cycleDays).count == 2)
+        #expect(engine.cycle(of: me(engine), in: both)?.starts == [CalDate(2026, 11, 1)]) // mine came back after the reload
     }
 
     @Test func theOtherMembersDaysAndSettingsArriveAndGo() async throws {
@@ -78,7 +83,7 @@ struct CycleEngineTests {
         externalSettings(server, CalCycleSettings(calendarID: own, personID: them, cycleLength: 0, periodLength: 6))
         await engine.refresh()
         let cal = try #require(engine.calendar(own))
-        #expect(engine.cyclePeople(in: cal) == [them])
+        #expect(engine.cyclePeople(in: cal) == [me(engine), them])
         let est = try #require(engine.cycle(of: them, in: cal))
         #expect(est.starts == [CalDate(2026, 10, 1), CalDate(2026, 10, 29)])
         #expect(est.cycleLength == 28)
@@ -104,16 +109,17 @@ struct CycleEngineTests {
         #expect(engine.cycle(of: me(engine), in: cal)?.days.isEmpty == true)
     }
 
-    /// Someone outside the pair is refused (InvalidArgument): the row goes.
-    @Test func aDayForAnOutsiderIsRefusedAndRemoved() async throws {
+    /// Someone outside the pair tracks nothing here: a day for them is never
+    /// written or sent (the server would refuse it, InvalidArgument).
+    @Test func aDayForAnOutsiderIsNeverSent() async throws {
         let (engine, server, own) = await consented()
         let cal = try #require(engine.calendar(own))
         let stranger = UUID()
         engine.logCycleDay(in: cal, for: stranger, on: CalDate(2026, 11, 3), flow: .medium)
         await engine.refresh()
         #expect(server.get(\.cycleDays).isEmpty)
-        #expect(engine.notices.count == 1)
-        #expect(engine.cyclePeople(in: cal).isEmpty)
+        #expect(engine.notices.isEmpty)
+        #expect(engine.cycle(of: stranger, in: cal) == nil)
         #expect(engine.pendingCount == 0)
     }
 
@@ -144,7 +150,7 @@ struct CycleEngineTests {
         await engine.refresh()
         #expect(server.get { $0.cycleSettings.values.map(\.cycleLength) } == [31])
         #expect(engine.cycle(of: me(engine), in: cal)?.cycleLength == 31)
-        #expect(engine.cyclePeople(in: cal) == [me(engine)])
+        #expect(engine.cyclePeople(in: cal) == [me(engine), cal.otherID])
     }
 
     /// The cycle cursor moves with what was taken: a second sync asks only for
@@ -195,13 +201,14 @@ struct CycleEngineTests {
         #expect(days() == 1)
     }
 
-    /// A day queued offline, and the other turns cycle off before it lands:
-    /// refused, removed here, one notice, nothing left queued.
+    /// A day for them queued offline, and they stop tracking before it
+    /// lands: refused, removed here, one notice, nothing left queued.
     @Test func aQueuedDayAfterConsentWentOffIsDroppedWithANotice() async throws {
         let (engine, server, own) = await consented()
         let cal = try #require(engine.calendar(own))
+        let them = cal.otherID
         server.set { $0.offline = true }
-        engine.logCycleDay(in: cal, for: me(engine), on: CalDate(2026, 11, 5), flow: .light)
+        engine.logCycleDay(in: cal, for: them, on: CalDate(2026, 11, 5), flow: .light)
         server.externalCycleConsent(own, false)
         server.set { $0.offline = false }
         await engine.refresh()
@@ -212,7 +219,7 @@ struct CycleEngineTests {
         // Back on: nothing of the refused day comes back.
         server.externalCycleConsent(own, true)
         await engine.refresh()
-        #expect(engine.cycle(of: me(engine), in: try #require(engine.calendar(own)))?.days.isEmpty == true)
+        #expect(engine.cycle(of: them, in: try #require(engine.calendar(own)))?.days.isEmpty == true)
     }
 
     @Test func cycleRowsSurviveAReopen() async throws {

@@ -608,12 +608,14 @@ struct CycleLegend: View {
 /// The private sheet on screen: a new entry (on a day, into one of these
 /// pairs) or an existing one.
 enum PrivateSheet: Identifiable {
-    case new(day: CalDate, pairs: [UUID])
+    /// `for`: whose encounter it is, when logging one for the other member
+    /// (MVCALE-51); nil, your own.
+    case new(day: CalDate, pairs: [UUID], for: UUID? = nil)
     case edit(CalPrivateEntry)
 
     var id: String {
         switch self {
-        case .new(let d, _): "new-\(d)"
+        case .new(let d, _, let who): "new-\(d)-\(who?.uuidString ?? "")"
         case .edit(let e): "edit-\(e.id)"
         }
     }

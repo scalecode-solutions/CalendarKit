@@ -11,7 +11,6 @@ import SwiftUI
 public struct PairPrivacySheet: View {
     let engine: CalendarEngine
     let calendarID: UUID
-    @State private var showMine = false
     /// The partner a swipe asked to remove. The dialog hangs off the List, not
     /// a section header a List can drop once it scrolls away (Frond's review).
     @State private var removing: CalPartner?
@@ -27,25 +26,11 @@ public struct PairPrivacySheet: View {
                 ConsentSection(engine: engine, pair: c, kind: .intimate)
                 if c.intimateOn { PartnersSection(engine: engine, pair: c, removing: $removing) }
                 ConsentSection(engine: engine, pair: c, kind: .cycle)
-                if c.cycleOn {
-                    // Whose cycles this pair tracks: anyone with a logged day or
-                    // settings. Yours shows once you ask for it (or log one).
-                    let people = engine.cyclePeople(in: c)
-                    let me = engine.config.currentUserID
-                    if people.contains(me) || showMine {
-                        CycleSettingsSection(engine: engine, pair: c, person: me, title: "Your cycle")
-                    }
-                    if people.contains(c.otherID) {
-                        CycleSettingsSection(engine: engine, pair: c, person: c.otherID, title: "\(engine.displayName(c))’s cycle")
-                    }
-                    if !people.contains(me) && !showMine && !c.frozen {
-                        Section {
-                            Button("Track my cycle too") { showMine = true }
-                                .accessibilityIdentifier("privacy.cycle.mine")
-                        } footer: {
-                            if people.isEmpty { Text("Or log a period day from any day on the calendar.") }
-                        }
-                    }
+                // Each person tracks their own cycle (MVCALE-51): settings for
+                // whoever has it on.
+                ForEach(engine.cyclePeople(in: c), id: \.self) { person in
+                    CycleSettingsSection(engine: engine, pair: c, person: person,
+                                         title: person == engine.config.currentUserID ? "Your cycle" : "\(engine.displayName(c))’s cycle")
                 }
             }
             .calendarBackdrop(engine)
@@ -56,7 +41,7 @@ public struct PairPrivacySheet: View {
                                 titleVisibility: .visible, presenting: removing) { p in
                 Button("Remove", role: .destructive) { remove(p, engine) }
             } message: { _ in
-                Text("It leaves this list and the pickers. Past entries keep the name.")
+                Text("Past entries keep the name.")
             }
         } else {
             ContentUnavailableView("This calendar is gone", systemImage: "calendar.badge.exclamationmark")
@@ -76,14 +61,22 @@ enum ConsentState: Equatable {
         else { self = .off }
     }
 
-    func text(_ name: String, _ kind: CalConsentKind) -> String {
-        let what = kind == .intimate ? "intimate entries" : "cycle tracking"
+    /// The line under the switch, only when it says something the switch
+    /// doesn't (design review: short, a line at most).
+    func text(_ name: String, _ kind: CalConsentKind) -> String? {
+        if kind == .cycle {
+            // Each person's own: only whether the other tracks theirs.
+            switch self {
+            case .frozen: return "You two aren’t friends any more."
+            case .waitingForMe, .on: return "\(name) tracks theirs here."
+            case .off, .waitingForThem: return nil
+            }
+        }
         switch self {
-        case .frozen: return "You two aren’t friends any more, so \(what) can’t be turned on."
-        case .off: return "Off for both of you."
+        case .frozen: return "You two aren’t friends any more."
+        case .off, .on: return nil
         case .waitingForThem: return "On for you. It starts once \(name) turns it on too."
         case .waitingForMe: return "\(name) turned it on. It starts if you do too."
-        case .on: return "On for both of you."
         }
     }
 }
@@ -99,22 +92,24 @@ private struct ConsentSection: View {
     var body: some View {
         let state = ConsentState(mine: mine, theirs: theirs, frozen: pair.frozen)
         Section {
-            Toggle(kind == .intimate ? "Intimate entries" : "Cycle tracking",
+            Toggle(kind == .intimate ? "Intimate entries" : "Track my cycle",
                    isOn: Binding(get: { mine }, set: { engine.setConsent(pair, kind, $0) }))
                 // Off is always allowed; on needs friends (the server refuses a frozen pair).
                 .disabled(pair.frozen && !mine)
                 .accessibilityIdentifier(kind == .intimate ? "privacy.intimate" : "privacy.cycle")
-            Text(state.text(engine.displayName(pair), kind))
-                .font(.footnote)
-                .foregroundStyle(state == .on ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                .accessibilityIdentifier(kind == .intimate ? "privacy.intimate.state" : "privacy.cycle.state")
+            if let line = state.text(engine.displayName(pair), kind) {
+                Text(line)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier(kind == .intimate ? "privacy.intimate.state" : "privacy.cycle.state")
+            }
         } header: {
             Text(kind == .intimate ? "Intimate" : "Cycle")
         } footer: {
             if kind == .intimate {
-                Text("Only you two see them, and only while you both have this on. If either of you turns it off, they leave both phones until you both turn it on again.")
+                Text("Shows once you've both turned it on.")
             } else {
-                Text("Period days and estimates for either of you, on this calendar only, while you both have this on. Estimates from your entries. Not a medical device and not a contraceptive method.")
+                Text("Period days and estimates. Not a medical device or birth control.")
             }
         }
     }
@@ -129,7 +124,8 @@ private struct PartnersSection: View {
 
     var body: some View {
         // Removed partners (archived under the hood) stay on old entries only.
-        let partners = engine.partners(of: pair).filter { !$0.archived }
+        // Your own list (MVCALE-51): the other member keeps theirs.
+        let partners = engine.myPartners(of: pair).filter { !$0.archived }
         Section {
             ForEach(partners) { p in
                 NavigationLink {
@@ -171,9 +167,9 @@ private struct PartnersSection: View {
                 }
             }
         } header: {
-            Text("Partners")
+            Text("My partners")
         } footer: {
-            Text("One list for this calendar: you both see it and add to it, and the entry editor picks from it. A color draws the heart in it; without one the heart takes the color of whoever logged it. Removing a name keeps it on past entries. Your default is only yours: new entries and quick logs start with it.")
+            Text("Who you pick from when you log. A color tints their heart.")
         }
     }
 
@@ -225,7 +221,7 @@ private struct PartnerEditor: View {
                         .frame(maxWidth: .infinity)
                         .accessibilityIdentifier("privacy.partner.edit.remove")
                 } footer: {
-                    Text("It leaves this list and the pickers. Past entries keep the name.")
+                    Text("Past entries keep the name.")
                 }
             }
         }

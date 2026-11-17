@@ -1346,6 +1346,14 @@ public nonisolated struct Calendar_V1_IntimateContent: @unchecked Sendable {
     set {_uniqueStorage()._positions = newValue}
   }
 
+  /// Whose encounter it is (MVCALE-51): one of the pair's two members, who
+  /// needn't be whoever logged it ("I know she was with Cole on Friday").
+  /// partner_ids come from the subject's own list. "" = created_by.
+  public var subjectID: String {
+    get {_storage._subjectID}
+    set {_uniqueStorage()._subjectID = newValue}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -1409,6 +1417,11 @@ public nonisolated struct Calendar_V1_IntimatePartner: Sendable {
   public var rev: Int64 = 0
 
   public var deleted: Bool = false
+
+  /// Who added it, and so whose list it's on (MVCALE-51). Both members get
+  /// every partner (the other's entries need names), but each picks from their
+  /// own. "" = added before owners existed and never given one: nobody's.
+  public var ownerID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -3568,7 +3581,7 @@ nonisolated extension Calendar_V1_FinishedInside: SwiftProtobuf.Message, SwiftPr
 
 nonisolated extension Calendar_V1_IntimateContent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".IntimateContent"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}at\0\u{3}time_zone\0\u{3}duration_min\0\u{3}foreplay_min\0\u{3}partner_ids\0\u{1}solo\0\u{1}types\0\u{1}protection\0\u{3}finished_inside\0\u{3}orgasms_me\0\u{3}orgasms_partner\0\u{3}initiated_by\0\u{1}location\0\u{3}location_note\0\u{1}satisfaction\0\u{1}notes\0\u{3}quick_log\0\u{1}positions\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}at\0\u{3}time_zone\0\u{3}duration_min\0\u{3}foreplay_min\0\u{3}partner_ids\0\u{1}solo\0\u{1}types\0\u{1}protection\0\u{3}finished_inside\0\u{3}orgasms_me\0\u{3}orgasms_partner\0\u{3}initiated_by\0\u{1}location\0\u{3}location_note\0\u{1}satisfaction\0\u{1}notes\0\u{3}quick_log\0\u{1}positions\0\u{3}subject_id\0")
 
   fileprivate class _StorageClass {
     var _at: Int64 = 0
@@ -3589,6 +3602,7 @@ nonisolated extension Calendar_V1_IntimateContent: SwiftProtobuf.Message, SwiftP
     var _notes: String = String()
     var _quickLog: Bool = false
     var _positions: [String] = []
+    var _subjectID: String = String()
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -3617,6 +3631,7 @@ nonisolated extension Calendar_V1_IntimateContent: SwiftProtobuf.Message, SwiftP
       _notes = source._notes
       _quickLog = source._quickLog
       _positions = source._positions
+      _subjectID = source._subjectID
     }
   }
 
@@ -3653,6 +3668,7 @@ nonisolated extension Calendar_V1_IntimateContent: SwiftProtobuf.Message, SwiftP
         case 16: try { try decoder.decodeSingularStringField(value: &_storage._notes) }()
         case 17: try { try decoder.decodeSingularBoolField(value: &_storage._quickLog) }()
         case 18: try { try decoder.decodeRepeatedStringField(value: &_storage._positions) }()
+        case 19: try { try decoder.decodeSingularStringField(value: &_storage._subjectID) }()
         default: break
         }
       }
@@ -3715,6 +3731,9 @@ nonisolated extension Calendar_V1_IntimateContent: SwiftProtobuf.Message, SwiftP
       if !_storage._positions.isEmpty {
         try visitor.visitRepeatedStringField(value: _storage._positions, fieldNumber: 18)
       }
+      if !_storage._subjectID.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._subjectID, fieldNumber: 19)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -3742,6 +3761,7 @@ nonisolated extension Calendar_V1_IntimateContent: SwiftProtobuf.Message, SwiftP
         if _storage._notes != rhs_storage._notes {return false}
         if _storage._quickLog != rhs_storage._quickLog {return false}
         if _storage._positions != rhs_storage._positions {return false}
+        if _storage._subjectID != rhs_storage._subjectID {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -3827,7 +3847,7 @@ nonisolated extension Calendar_V1_IntimateEntry: SwiftProtobuf.Message, SwiftPro
 
 nonisolated extension Calendar_V1_IntimatePartner: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".IntimatePartner"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}calendar_id\0\u{1}name\0\u{1}color\0\u{1}archived\0\u{1}rev\0\u{1}deleted\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}calendar_id\0\u{1}name\0\u{1}color\0\u{1}archived\0\u{1}rev\0\u{1}deleted\0\u{3}owner_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -3842,6 +3862,7 @@ nonisolated extension Calendar_V1_IntimatePartner: SwiftProtobuf.Message, SwiftP
       case 5: try { try decoder.decodeSingularBoolField(value: &self.archived) }()
       case 6: try { try decoder.decodeSingularInt64Field(value: &self.rev) }()
       case 7: try { try decoder.decodeSingularBoolField(value: &self.deleted) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.ownerID) }()
       default: break
       }
     }
@@ -3869,6 +3890,9 @@ nonisolated extension Calendar_V1_IntimatePartner: SwiftProtobuf.Message, SwiftP
     if self.deleted != false {
       try visitor.visitSingularBoolField(value: self.deleted, fieldNumber: 7)
     }
+    if !self.ownerID.isEmpty {
+      try visitor.visitSingularStringField(value: self.ownerID, fieldNumber: 8)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -3880,6 +3904,7 @@ nonisolated extension Calendar_V1_IntimatePartner: SwiftProtobuf.Message, SwiftP
     if lhs.archived != rhs.archived {return false}
     if lhs.rev != rhs.rev {return false}
     if lhs.deleted != rhs.deleted {return false}
+    if lhs.ownerID != rhs.ownerID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

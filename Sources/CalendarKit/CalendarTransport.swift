@@ -498,6 +498,7 @@ enum Wire {
         w.notes = c.notes
         w.quickLog = c.quickLog
         w.positions = c.positions
+        w.subjectID = c.subjectID.map(id) ?? ""
         return w
     }
 
@@ -520,6 +521,7 @@ enum Wire {
         c.notes = w.notes
         c.quickLog = w.quickLog
         c.positions = w.positions
+        c.subjectID = UUID(uuidString: w.subjectID)
         return c
     }
 
@@ -530,7 +532,8 @@ enum Wire {
     }
 
     static func partner(_ w: Calendar_V1_IntimatePartner) throws -> CalPartner {
-        CalPartner(id: try uuid(w.id), calendarID: try uuid(w.calendarID), name: w.name, color: color(w.color),
+        CalPartner(id: try uuid(w.id), calendarID: try uuid(w.calendarID), ownerID: UUID(uuidString: w.ownerID),
+                   name: w.name, color: color(w.color),
                    archived: w.archived, rev: w.rev, deleted: w.deleted)
     }
 

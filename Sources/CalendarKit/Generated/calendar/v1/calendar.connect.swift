@@ -113,8 +113,10 @@ public protocol Calendar_V1_CalendarServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `deleteIntimateEntry`(request: Calendar_V1_DeleteIntimateEntryRequest, headers: Connect.Headers) async -> ResponseMessage<Calendar_V1_DeleteIntimateEntryResponse>
 
-    /// SaveIntimatePartner creates or changes a name on the pair's partner list
-    /// (archive instead of delete: entries keep pointing at it).
+    /// SaveIntimatePartner creates or changes a name on the caller's own partner
+    /// list in the pair (archive instead of delete: entries keep pointing at it).
+    /// A new partner belongs to whoever adds it; only they may change it
+    /// (PermissionDenied otherwise, MVCALE-51).
     @available(iOS 13, *)
     func `saveIntimatePartner`(request: Calendar_V1_SaveIntimatePartnerRequest, headers: Connect.Headers) async -> ResponseMessage<Calendar_V1_SaveIntimatePartnerResponse>
 

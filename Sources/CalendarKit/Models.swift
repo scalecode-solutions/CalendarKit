@@ -107,8 +107,14 @@ public struct CalCalendar: Identifiable, Equatable, Sendable, Codable {
     /// The server's newest cycle change, and where this device is in it.
     public var cycleRev: Int64 = 0
     public internal(set) var cycleCursor: Int64 = 0
-    /// Both members have turned cycle tracking on.
-    public var cycleOn: Bool { cycleMine && cycleTheirs }
+    /// Someone on the pair tracks their cycle here. Cycle tracking is each
+    /// person's own (MVCALE-51): theirs shows to both members once they turn
+    /// it on, whatever the other's switch says.
+    public var cycleOn: Bool { cycleMine || cycleTheirs }
+    /// Whether this person tracks their cycle on the pair (`me` is the viewer).
+    public func tracksCycle(_ person: UUID, me: UUID) -> Bool {
+        person == me ? cycleMine : person == otherID ? cycleTheirs : false
+    }
     /// Both members have turned intimate entries on.
     public var intimateOn: Bool { intimateMine && intimateTheirs }
 

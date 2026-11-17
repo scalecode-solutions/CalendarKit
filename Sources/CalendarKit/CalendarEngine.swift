@@ -1058,10 +1058,16 @@ public final class CalendarEngine {
     }
 
     /// Add or change a name on a pair's partner list (shared by both).
+    /// A new partner is the person's own; only its owner changes one (the
+    /// server refuses anyone else, MVCALE-51).
     public func savePartner(_ partner: CalPartner) {
         openStore() // a write before the first refresh must not be lost
-        store?.putPartner(partner)
-        commit(.savePartner(partner))
+        var p = partner
+        if p.ownerID == nil && store?.partners().contains(where: { $0.id == p.id }) != true {
+            p.ownerID = config.currentUserID
+        }
+        store?.putPartner(p)
+        commit(.savePartner(p))
     }
 
     /// The private entries the person may see: on pairs where both members
@@ -1080,10 +1086,10 @@ public final class CalendarEngine {
     // MARK: cycle (0.8.0 design sprint, PROVISIONAL)
 
     /// Log (or change) a day of someone's cycle on a pair: either member may
-    /// log for either of them.
+    /// log for whoever tracks theirs there (the server refuses anyone else).
     public func logCycleDay(in calendar: CalCalendar, for person: UUID, on day: CalDate, flow: CalFlow) {
         openStore() // a write before the first refresh must not be lost
-        guard let store else { return }
+        guard let store, calendar.tracksCycle(person, me: config.currentUserID) else { return }
         let existing = store.cycleDays().first { $0.calendarID == calendar.id && $0.personID == person && $0.date == day && !$0.deleted }
         let d = CalCycleDay(id: existing?.id ?? UUID(), calendarID: calendar.id, personID: person, date: day, flow: flow,
                             rev: existing?.rev ?? 0)
@@ -1103,21 +1109,18 @@ public final class CalendarEngine {
         commit(.saveCycleSettings(settings))
     }
 
-    /// Whose cycles a pair tracks: the members with any logged day (or settings).
+    /// Whose cycles a pair tracks: each member who has turned tracking on
+    /// (MVCALE-51), you first.
     public func cyclePeople(in calendar: CalCalendar) -> [UUID] {
         _ = revision
-        guard calendar.cycleOn, let store else { return [] }
-        let ids = store.cycleDays().filter { $0.calendarID == calendar.id && !$0.deleted }.map(\.personID)
-            + store.cycleSettings().filter { $0.calendarID == calendar.id }.map(\.personID)
-        var seen: [UUID] = []
-        for id in ids where !seen.contains(id) { seen.append(id) }
-        return seen
+        let me = config.currentUserID
+        return [me, calendar.otherID].filter { calendar.tracksCycle($0, me: me) }
     }
 
-    /// The estimator for one person's cycle on a pair (only while both consented).
+    /// The estimator for one person's cycle on a pair (only while they track it).
     public func cycle(of person: UUID, in calendar: CalCalendar) -> CalCycleEstimator? {
         _ = revision
-        guard calendar.cycleOn, let store else { return nil }
+        guard calendar.tracksCycle(person, me: config.currentUserID), let store else { return nil }
         let days = store.cycleDays().filter { $0.calendarID == calendar.id && $0.personID == person }
         let settings = store.cycleSettings().first { $0.calendarID == calendar.id && $0.personID == person }
         return CalCycleEstimator(days: days, settings: settings)
@@ -1130,7 +1133,7 @@ public final class CalendarEngine {
         _ = defaultPartnerChanges
         guard let raw = UserDefaults.standard.string(forKey: Self.defaultPartnerKey(config.currentUserID, calendar.id)),
               let id = UUID(uuidString: raw) else { return nil }
-        return partners(of: calendar).contains { $0.id == id && !$0.archived } ? id : nil
+        return myPartners(of: calendar).contains { $0.id == id && !$0.archived } ? id : nil
     }
 
     /// nil: no default (new entries start with who unset).
@@ -1147,7 +1150,15 @@ public final class CalendarEngine {
     /// Bumped by setDefaultPartner so views reading defaultPartner redraw.
     private var defaultPartnerChanges = 0
 
-    /// A pair's partner list (archived ones last).
+    /// The person's own partners on a pair (MVCALE-51): what the editor's
+    /// Who, Privacy and the default offer. The other member's, and any from
+    /// before partners had an owner, only name old entries (`partners(of:)`).
+    public func myPartners(of calendar: CalCalendar) -> [CalPartner] {
+        partners(of: calendar).filter { $0.ownerID == config.currentUserID }
+    }
+
+    /// Every partner on a pair, both members' (archived ones last): for
+    /// naming entries and coloring hearts.
     public func partners(of calendar: CalCalendar) -> [CalPartner] {
         _ = revision
         return (store?.partners() ?? []).filter { $0.calendarID == calendar.id && !$0.deleted }
@@ -1160,7 +1171,7 @@ public final class CalendarEngine {
     public func hearts(_ entries: [CalPrivateEntry]) -> [CalHeart] {
         let partners = Dictionary((store?.partners() ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         return CalHeart.hearts(entries, partners: partners) { e in
-            e.createdBy == self.config.currentUserID ? self.accentColor
+            e.subject == self.config.currentUserID ? self.accentColor
                 : (self.calendar(e.calendarID)?.displayColor ?? .gray)
         }
     }

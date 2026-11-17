@@ -50,7 +50,7 @@ struct PrivateEntryEditor: View {
         self.engine = engine
         self.sheet = sheet
         switch sheet {
-        case .new(let day, let pairs):
+        case .new(let day, let pairs, let subject):
             // Today: now. Another day: that day at the current time.
             let now = Date()
             let zone = TimeZone.current
@@ -63,8 +63,9 @@ struct PrivateEntryEditor: View {
                                                    hour: t.hour, minute: t.minute)) ?? now
             }
             var c = CalPrivateContent(at: at, timeZone: zone.identifier)
-            // The person's own default partner on that pair, if they set one.
-            if let first = pairs.first.flatMap({ engine.calendar($0) }), let p = engine.defaultPartner(in: first) {
+            c.subjectID = subject
+            // Your own entry starts with your default partner, if you set one.
+            if subject == nil, let first = pairs.first.flatMap({ engine.calendar($0) }), let p = engine.defaultPartner(in: first) {
                 c.partnerIDs = [p]
             }
             _content = State(initialValue: c)
@@ -84,7 +85,7 @@ struct PrivateEntryEditor: View {
 
     private var pairChoices: [CalCalendar] {
         switch sheet {
-        case .new(_, let pairs): pairs.compactMap { engine.calendar($0) }
+        case .new(_, let pairs, _): pairs.compactMap { engine.calendar($0) }
         case .edit(let e): engine.calendar(e.calendarID).map { [$0] } ?? []
         }
     }
@@ -93,13 +94,28 @@ struct PrivateEntryEditor: View {
     /// Where partners come from, when there are none yet.
     private var noPartners: String {
         let who = pair.map { engine.displayName($0) } ?? "them"
+        if forOther { return "\(who) hasn't added any partners yet. They add their own under Privacy." }
         return "No partners yet. Add them under Privacy in your settings with \(who)."
     }
     /// A frozen pair (or one whose consent went off) is read-only.
     private var readOnly: Bool { pair.map { $0.frozen || !$0.intimateOn } ?? true }
+    /// Every partner on the pair, both members': to name what an entry has.
     private var partners: [CalPartner] { pair.map { engine.partners(of: $0) } ?? [] }
-    /// The names offered: every current one, and archived ones this entry already has.
-    private var offered: [CalPartner] { partners.filter { !$0.archived || content.partnerIDs.contains($0.id) } }
+    /// Whose encounter this is: the entry's subject, or for a new one, whoever
+    /// it's being logged for (you, unless + said otherwise).
+    private var subject: UUID {
+        existing?.subject ?? content.subjectID ?? engine.config.currentUserID
+    }
+    private var forOther: Bool { subject != engine.config.currentUserID }
+    /// The names offered (MVCALE-51): the subject's own current list, never
+    /// the other member's, so nobody picks themselves; plus whoever this entry
+    /// already names, so it reads as it is. Either of you may edit it (plan
+    /// decision 18); Who always draws from the subject's list.
+    private var offered: [CalPartner] {
+        let theirs = partners.filter { $0.ownerID == subject }
+        return theirs.filter { !$0.archived || content.partnerIDs.contains($0.id) }
+            + partners.filter { p in content.partnerIDs.contains(p.id) && !theirs.contains { $0.id == p.id } }
+    }
 
     var body: some View {
         Form {
@@ -125,7 +141,7 @@ struct PrivateEntryEditor: View {
         .onChange(of: calendarID) { _, id in
             guard existing == nil, let c = id.flatMap({ engine.calendar($0) }) else { return }
             content.solo = false
-            content.partnerIDs = engine.defaultPartner(in: c).map { [$0] } ?? []
+            content.partnerIDs = content.subjectID == nil ? (engine.defaultPartner(in: c).map { [$0] } ?? []) : []
             content.finishedInside = [:]
         }
         .scrollContentBackground(.hidden)
@@ -202,9 +218,22 @@ struct PrivateEntryEditor: View {
 
     private var whoSection: some View {
         Section {
+            // Solo is a switch of its own, above Who (MVCALE-51).
+            Toggle("Solo", isOn: Binding(get: { content.solo }, set: { who.wrappedValue = $0 ? .solo : .notSet }))
+                .accessibilityIdentifier("solo")
+            if !content.solo { whoPicker }
+        } footer: {
+            if forOther, let pair {
+                Text("For \(engine.displayName(pair)): who comes from their partner list.")
+            } else if content.needsWho {
+                Text("Turn on Solo or pick who. Until then it shows as a hollow heart.")
+            }
+        }
+    }
+
+    @ViewBuilder private var whoPicker: some View {
             Picker("Who", selection: who) {
                 Text("Not set").tag(Who.notSet)
-                Text("Solo").tag(Who.solo)
                 if content.partnerIDs.count > 1 {
                     Text(PrivateEntryRow.names(content.partnerIDs, partners: partners)).tag(Who.several(content.partnerIDs))
                 }
@@ -221,9 +250,6 @@ struct PrivateEntryEditor: View {
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("noPartners")
             }
-        } footer: {
-            if content.needsWho { Text("Pick who, or Solo. Until then it shows as a hollow heart.") }
-        }
     }
 
     private var finishedSection: some View {

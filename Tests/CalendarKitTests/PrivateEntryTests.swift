@@ -129,6 +129,54 @@ struct PrivateEntryTests {
         #expect(DropMark.kind(nil) == nil)
     }
 
+    /// Partners belong to whoever adds them (MVCALE-51): mine are offered to
+    /// me, theirs only name their entries; an entry for them uses their list,
+    /// and its heart is theirs.
+    @Test func partnersAreEachPersonsOwnAndAnEntryUsesItsSubjectsList() async throws {
+        let (engine, server, own) = makeEngine()
+        server.externalConsent(own, true)
+        await engine.refresh()
+        let pair = try #require(engine.calendar(own))
+        engine.setConsent(pair, .intimate, true)
+        await engine.refresh()
+        let me = engine.config.currentUserID, them = pair.otherID
+        engine.savePartner(CalPartner(calendarID: own, name: "Jordan"))
+        let cole = CalPartner(calendarID: own, ownerID: them, name: "Cole")
+        server.externalPartner(cole)
+        await engine.refresh()
+        let jordan = try #require(engine.myPartners(of: pair).first)
+        #expect(jordan.ownerID == me && jordan.name == "Jordan")
+        #expect(engine.myPartners(of: pair).map(\.name) == ["Jordan"])
+        #expect(Set(engine.partners(of: pair).map(\.name)) == ["Cole", "Jordan"])
+        // Their partner is no default of mine, and I can't change it.
+        engine.setDefaultPartner(cole.id, in: pair)
+        #expect(engine.defaultPartner(in: pair) == nil)
+        engine.setDefaultPartner(nil, in: pair)
+        var renamed = try #require(engine.partners(of: pair).first { $0.id == cole.id })
+        renamed.name = "Nicole"
+        engine.savePartner(renamed)
+        await engine.refresh()
+        #expect(engine.notices.count == 1)
+        #expect(server.get { $0.partners[cole.id]?.name } == "Cole")
+
+        // An entry for them, with their partner: saved, and the heart is theirs.
+        var c = CalPrivateContent(at: nov16)
+        c.subjectID = them
+        c.partnerIDs = [cole.id]
+        engine.savePrivate(CalPrivateEntry(calendarID: own, content: c, createdBy: me))
+        await engine.refresh()
+        let entry = try #require(engine.privateEntries(from: CalDate(2026, 11, 16), through: CalDate(2026, 11, 16), zone: chicago).first)
+        #expect(entry.subject == them && entry.createdBy == me && entry.rev > 0)
+        #expect(engine.hearts([entry]).map(\.author) == [them])
+        // Mine naming their partner: refused, gone.
+        var wrong = CalPrivateContent(at: nov16)
+        wrong.partnerIDs = [cole.id]
+        engine.savePrivate(CalPrivateEntry(calendarID: own, content: wrong, createdBy: me))
+        await engine.refresh()
+        #expect(engine.privateEntries(from: CalDate(2026, 11, 16), through: CalDate(2026, 11, 16), zone: chicago).count == 1)
+        #expect(engine.notices.count == 2)
+    }
+
     @Test func aQuickLogIsHollowUntilWhoIsSet() async throws {
         let (engine, server, own) = makeEngine()
         server.externalConsent(own, true)

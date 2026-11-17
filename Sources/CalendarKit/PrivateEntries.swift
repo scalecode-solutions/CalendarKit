@@ -29,6 +29,9 @@ public struct CalPrivateContent: Equatable, Sendable, Codable {
     /// Logged in one tap; the details come later.
     public var quickLog = false
     public var positions: [String] = []
+    /// Whose encounter it is (MVCALE-51): either member may log one for the
+    /// other ("I know she was with Cole on Friday"). nil: whoever logged it.
+    public var subjectID: UUID?
 
     public init(at: Date, timeZone: String = TimeZone.current.identifier) {
         self.at = at
@@ -62,12 +65,20 @@ public struct CalPrivateEntry: Identifiable, Equatable, Sendable, Codable {
 
     /// The day it falls on, in a zone.
     public func day(in zone: TimeZone) -> CalDate { CalDate(content.at, in: zone) }
+
+    /// Whose encounter it is: its subject, else whoever logged it.
+    public var subject: UUID { content.subjectID ?? createdBy }
 }
 
-/// A name on a pair's partner list (both members share it).
+/// A name on one person's partner list, on a pair (MVCALE-51): each member
+/// keeps their own; both receive both lists, so the other's entries still
+/// show who.
 public struct CalPartner: Identifiable, Equatable, Sendable, Codable {
     public let id: UUID
     public let calendarID: UUID
+    /// Who added it (only they change it). nil: from before partners had an
+    /// owner, offered to nobody, still naming old entries.
+    public var ownerID: UUID?
     public var name: String
     /// .none: the heart falls back to whoever logged the entry.
     public var color: CalColor
@@ -75,10 +86,11 @@ public struct CalPartner: Identifiable, Equatable, Sendable, Codable {
     public var rev: Int64
     public var deleted: Bool
 
-    public init(id: UUID = UUID(), calendarID: UUID, name: String, color: CalColor = .none,
+    public init(id: UUID = UUID(), calendarID: UUID, ownerID: UUID? = nil, name: String, color: CalColor = .none,
                 archived: Bool = false, rev: Int64 = 0, deleted: Bool = false) {
         self.id = id
         self.calendarID = calendarID
+        self.ownerID = ownerID
         self.name = name
         self.color = color
         self.archived = archived
@@ -104,8 +116,9 @@ public struct CalPrivateDelta: Equatable, Sendable {
     public static let none = CalPrivateDelta(entries: [], partners: [], rev: 0, hasMore: false, reset: false)
 }
 
-/// A day's hearts on the grid: one per author, colored by the partner when
-/// every entry names one partner color, else by whoever logged them (plan
+/// A day's hearts on the grid: one per person the entries are about (their
+/// subject), colored by the partner when every entry names one partner color,
+/// else by that person's color (plan
 /// decision 9).
 public struct CalHeart: Equatable, Sendable, Identifiable {
     public let author: UUID
@@ -120,7 +133,8 @@ public struct CalHeart: Equatable, Sendable, Identifiable {
     /// other member's).
     static func hearts(_ entries: [CalPrivateEntry], partners: [UUID: CalPartner],
                        authorColor: (CalPrivateEntry) -> CalColor) -> [CalHeart] {
-        let byAuthor = Dictionary(grouping: entries, by: \.createdBy)
+        // Per person the entries are about (their subject, MVCALE-51).
+        let byAuthor = Dictionary(grouping: entries, by: \.subject)
         return byAuthor.keys.sorted { $0.uuidString < $1.uuidString }.map { author in
             let mine = byAuthor[author]!
             let colors = Set(mine.map { e -> CalColor in

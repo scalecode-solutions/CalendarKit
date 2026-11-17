@@ -21,6 +21,9 @@ final class FakeServer: CalendarTransport, Sendable {
         var cycleDays: [UUID: CalCycleDay] = [:]
         var cycleSettings: [UUID: CalCycleSettings] = [:] // by CalPairID.make(calendar, person), like the store
         var cycleRev: [UUID: Int64] = [:]
+        /// A cycle consent change purges the stream up to here (the server's
+        /// cycle_purged_rev): a cursor below it reloads from scratch.
+        var cyclePurged: [UUID: Int64] = [:]
         var events: [UUID: CalEvent] = [:]
         var labels: [UUID: (CalLabel, deleted: Bool)] = [:]
         var offline = false
@@ -209,16 +212,24 @@ final class FakeServer: CalendarTransport, Sendable {
                     all.append(d)
                 }
             }
-            // The cycle stream: the same shape, under the cycle consent.
+            // The cycle stream, as the server sends it (MVCALE-51): each
+            // person's rows while that person tracks; a cursor below the last
+            // consent change's purge line resets and reloads.
             for c in s.calendars {
                 let held = cursors[c.id]?.cycle ?? 0
                 let cyc: CalCycleDelta
                 if c.cycleOn {
                     let rev = s.cycleRev[c.id] ?? 0
-                    guard rev > held else { continue }
-                    let ds = s.cycleDays.values.filter { $0.calendarID == c.id && $0.rev > held }
-                    let ss = s.cycleSettings.values.filter { $0.calendarID == c.id && $0.rev > held }
-                    cyc = CalCycleDelta(days: ds, settings: ss, rev: rev, hasMore: false, reset: false)
+                    if held > 0 && held < (s.cyclePurged[c.id] ?? 0) {
+                        cyc = CalCycleDelta(days: [], settings: [], rev: 0, hasMore: false, reset: true)
+                    } else {
+                        guard rev > held else { continue }
+                        let me = s.me
+                        let tracks = { (p: UUID) in c.tracksCycle(p, me: me) }
+                        let ds = s.cycleDays.values.filter { $0.calendarID == c.id && $0.rev > held && tracks($0.personID) }
+                        let ss = s.cycleSettings.values.filter { $0.calendarID == c.id && $0.rev > held && tracks($0.personID) }
+                        cyc = CalCycleDelta(days: ds, settings: ss, rev: rev, hasMore: false, reset: false)
+                    }
                 } else if held > 0 {
                     cyc = CalCycleDelta(days: [], settings: [], rev: 0, hasMore: false, reset: true)
                 } else { continue }
@@ -398,7 +409,10 @@ final class FakeServer: CalendarTransport, Sendable {
         try state.withLock { s in
             try gate(&s, "consent")
             guard let i = s.calendars.firstIndex(where: { $0.id == calendarID }) else { throw CalTransportError.notFound }
-            if kind == .intimate { s.calendars[i].intimateMine = on } else { s.calendars[i].cycleMine = on }
+            if kind == .intimate { s.calendars[i].intimateMine = on } else {
+                s.calendars[i].cycleMine = on
+                cyclePurge(&s, calendarID)
+            }
             return s.calendars[i]
         }
     }
@@ -424,6 +438,17 @@ final class FakeServer: CalendarTransport, Sendable {
             try gate(&s, "private")
             try privateWritable(s, e.calendarID)
             if let cur = s.privates[e.id], cur.rev != baseRev { throw CalTransportError.conflict(current: nil) }
+            // The server's rule (MVCALE-51): the subject is a member, and every
+            // partner named is the subject's (or nobody's, from before owners).
+            let subject = e.content.subjectID ?? s.privates[e.id]?.createdBy ?? s.me
+            guard let cal = s.calendars.first(where: { $0.id == e.calendarID }), subject == s.me || subject == cal.otherID else {
+                throw CalTransportError.invalid("the subject is one of you two")
+            }
+            for id in e.content.partnerIDs + Array(e.content.finishedInside.keys) {
+                guard let p = s.partners[id], p.calendarID == e.calendarID, p.ownerID == nil || p.ownerID == subject else {
+                    throw CalTransportError.invalid("a partner on this entry isn't on their list")
+                }
+            }
             var saved = e
             saved.rev = bumpPrivate(&s, e.calendarID)
             s.privates[e.id] = saved
@@ -445,15 +470,28 @@ final class FakeServer: CalendarTransport, Sendable {
 
     /// The other member turns cycle consent on or off.
     func externalCycleConsent(_ cal: UUID, _ on: Bool) {
-        set { s in if let i = s.calendars.firstIndex(where: { $0.id == cal }) { s.calendars[i].cycleTheirs = on } }
+        set { s in
+            if let i = s.calendars.firstIndex(where: { $0.id == cal }) {
+                s.calendars[i].cycleTheirs = on
+                cyclePurge(&s, cal)
+            }
+        }
     }
 
-    /// The real server's cycleAccess: a member writes while both consented
-    /// (else NotFound), for either member only (else InvalidArgument).
+    /// Every cycle consent change bumps the stream and purges up to it, so
+    /// both phones reload it filtered to whoever tracks now (Leaf's server).
+    private func cyclePurge(_ s: inout State, _ cal: UUID) {
+        let r = bumpCycle(&s, cal)
+        s.cyclePurged[cal] = r
+    }
+
+    /// The real server's cycleAccess: a member writes while someone tracks
+    /// (else NotFound), for a member who tracks theirs (else InvalidArgument).
     private func cycleWritable(_ s: State, _ cal: UUID, person: UUID) throws {
         try writable(s, cal)
         guard let c = s.calendars.first(where: { $0.id == cal }), c.cycleOn else { throw CalTransportError.notFound }
         guard person == s.me || person == c.otherID else { throw CalTransportError.invalid("not a member") }
+        guard c.tracksCycle(person, me: s.me) else { throw CalTransportError.invalid("they don't track their cycle here") }
     }
 
     func bumpCycle(_ s: inout State, _ cal: UUID) -> Int64 {
@@ -501,9 +539,26 @@ final class FakeServer: CalendarTransport, Sendable {
             try gate(&s, "partner")
             try privateWritable(s, p.calendarID)
             var saved = p
+            // The server's rule (MVCALE-51): a new partner is the caller's;
+            // only its owner changes one.
+            if let old = s.partners[p.id] {
+                guard old.ownerID == s.me else { throw CalTransportError.invalid("only whoever added a partner can change it") }
+                saved.ownerID = old.ownerID
+            } else {
+                saved.ownerID = s.me
+            }
             saved.rev = bumpPrivate(&s, p.calendarID)
             s.partners[p.id] = saved
             return saved
+        }
+    }
+
+    /// The other member adds a partner of their own.
+    func externalPartner(_ p: CalPartner) {
+        set { s in
+            var q = p
+            q.rev = bumpPrivate(&s, p.calendarID)
+            s.partners[p.id] = q
         }
     }
 }
