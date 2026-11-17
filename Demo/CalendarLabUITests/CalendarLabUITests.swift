@@ -98,6 +98,34 @@ final class CalendarLabUITests: XCTestCase {
         XCTAssert(month.exists && month.isHittable, "not back on the calendar")
     }
 
+    /// The calendar is on screen. + is a plain "New Event" button, or the
+    /// Add menu once the pair has intimate or cycle on (with per-person
+    /// cycle, the friend's own switch is enough, as ui-test.sh's CONSENT_FROM
+    /// seeds it), so wait on Account, which is there either way.
+    func waitForCalendar() {
+        XCTAssert(app.buttons["Account"].waitForExistence(timeout: 15), "the calendar never showed")
+    }
+
+    /// + → a new event, whichever shape + has.
+    func tapNewEvent() {
+        let plain = app.buttons["New Event"]
+        if plain.exists { plain.tap(); return }
+        app.buttons["addMenu"].firstMatch.tap()
+        let event = app.buttons["Event"].firstMatch
+        XCTAssert(event.waitForExistence(timeout: 5), "no Event in +")
+        event.tap()
+    }
+
+    /// The day view's + → a new event on the day shown.
+    func tapNewEventInDay() {
+        let plain = app.navigationBars.buttons["New Event"]
+        if plain.exists { plain.tap(); return }
+        app.navigationBars.buttons["addMenu"].firstMatch.tap()
+        let event = app.buttons["Event"].firstMatch
+        XCTAssert(event.waitForExistence(timeout: 5), "no Event in the day view's +")
+        event.tap()
+    }
+
     func shot(_ name: String) {
         let a = XCTAttachment(screenshot: app.screenshot())
         a.name = name
@@ -106,11 +134,11 @@ final class CalendarLabUITests: XCTestCase {
     }
 
     func testAddOpenAndManage() throws {
-        XCTAssert(app.buttons["New Event"].waitForExistence(timeout: 15))
+        waitForCalendar()
         shot("1-month")
 
         // Add an event through the editor.
-        app.buttons["New Event"].tap()
+        tapNewEvent()
         XCTAssert(app.navigationBars["New Event"].waitForExistence(timeout: 5))
         let title = app.textFields["Title"]
         title.tap()
@@ -170,8 +198,8 @@ final class CalendarLabUITests: XCTestCase {
     }
 
     func testAgendaShowsWhatsComingAndRemembersTheChoice() throws {
-        XCTAssert(app.buttons["New Event"].waitForExistence(timeout: 15))
-        app.buttons["New Event"].tap()
+        waitForCalendar()
+        tapNewEvent()
         let title = app.textFields["Title"]
         XCTAssert(title.waitForExistence(timeout: 5))
         title.tap()
@@ -205,7 +233,7 @@ final class CalendarLabUITests: XCTestCase {
     /// The settings list a pair for the account's friend (from the contact
     /// list, before anyone has opened it), with its own show/hide switch.
     func testSettingsListTheFriendsPair() throws {
-        XCTAssert(app.buttons["New Event"].waitForExistence(timeout: 15))
+        waitForCalendar()
         app.buttons["Account"].tap()
         XCTAssert(app.navigationBars["Calendars"].waitForExistence(timeout: 5))
         _ = pairRow()
@@ -217,8 +245,8 @@ final class CalendarLabUITests: XCTestCase {
     /// them; hiding the pair takes it off Everyone and into "Hidden (1)", and
     /// focusing it from there shows it with "Show it again".
     func testFocusAndHidingAPair() throws {
-        XCTAssert(app.buttons["New Event"].waitForExistence(timeout: 15))
-        app.buttons["New Event"].tap()
+        waitForCalendar()
+        tapNewEvent()
         let title = app.textFields["Title"]
         XCTAssert(title.waitForExistence(timeout: 5))
         title.tap()
@@ -274,8 +302,8 @@ final class CalendarLabUITests: XCTestCase {
     }
 
     func testRepeatingEventAsksWhichOccurrences() throws {
-        XCTAssert(app.buttons["New Event"].waitForExistence(timeout: 15))
-        app.buttons["New Event"].tap()
+        waitForCalendar()
+        tapNewEvent()
         let title = app.textFields["Title"]
         XCTAssert(title.waitForExistence(timeout: 5))
         title.tap()
@@ -302,8 +330,8 @@ final class CalendarLabUITests: XCTestCase {
     /// picker, the colour grid, the detail's hero, and no reminders row on
     /// either. Run it once in light and once in dark for the screenshots.
     func testEditorAndDetailTour() throws {
-        XCTAssert(app.buttons["New Event"].waitForExistence(timeout: 15))
-        app.buttons["New Event"].tap()
+        waitForCalendar()
+        tapNewEvent()
         let title = app.textFields["Title"]
         XCTAssert(title.waitForExistence(timeout: 5))
         title.tap()
@@ -337,7 +365,7 @@ final class CalendarLabUITests: XCTestCase {
     /// NavigationStack (the kit requires one), and the chevrons and Today move
     /// between days. An empty day says so and offers Add.
     func testTappingADayPushesItsDayViewOntoTheHostsStack() throws {
-        XCTAssert(app.buttons["New Event"].waitForExistence(timeout: 15))
+        waitForCalendar()
         shot("d0-month")
         openToday()
         XCTAssert(app.navigationBars.buttons.element(boundBy: 0).exists, "no back button: not pushed")
@@ -359,7 +387,7 @@ final class CalendarLabUITests: XCTestCase {
         XCTAssert(shows("Today"), header.label)
         // + in the day view adds to the day shown.
         app.buttons["Next day"].tap()
-        app.navigationBars.buttons["New Event"].tap()
+        tapNewEventInDay()
         let title = app.textFields["Title"]
         XCTAssert(title.waitForExistence(timeout: 5))
         title.tap()
@@ -377,7 +405,7 @@ final class CalendarLabUITests: XCTestCase {
     /// MVCALE-32: "Opens on" in the calendar settings. A fixed choice wins
     /// over the remembered switch; Last used (the default) remembers it.
     func testOpensOnSetting() throws {
-        XCTAssert(app.buttons["New Event"].waitForExistence(timeout: 15))
+        waitForCalendar()
         app.buttons["Account"].tap()
         XCTAssert(app.navigationBars["Calendars"].waitForExistence(timeout: 5))
         let picker = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Opens on'")).firstMatch
@@ -389,7 +417,7 @@ final class CalendarLabUITests: XCTestCase {
         app.segmentedControls.buttons["Month"].tap()
         app.terminate()
         app.launch()
-        XCTAssert(app.buttons["New Event"].waitForExistence(timeout: 15))
+        waitForCalendar()
         XCTAssert(app.segmentedControls.buttons["Agenda"].isSelected, "Opens on: Agenda didn't open the agenda")
         // Back to Last used, leaving the app as other tests expect it.
         app.buttons["Account"].tap()
@@ -406,8 +434,8 @@ final class CalendarLabUITests: XCTestCase {
     func testLongWordsStayWhole() throws {
         let longTitle = "Parent teacher conference about the science fair project"
         let longPlace = "Lincoln Elementary School, Room 214, North Building"
-        XCTAssert(app.buttons["New Event"].waitForExistence(timeout: 15))
-        app.buttons["New Event"].tap()
+        waitForCalendar()
+        tapNewEvent()
         let title = app.textFields["Title"]
         XCTAssert(title.waitForExistence(timeout: 5))
         title.tap()
