@@ -141,28 +141,28 @@ struct PrivateEntryTests {
         await engine.refresh()
         let me = engine.config.currentUserID, them = pair.otherID
         engine.savePartner(CalPartner(calendarID: own, name: "Jordan"))
-        let cole = CalPartner(calendarID: own, ownerID: them, name: "Cole")
-        server.externalPartner(cole)
+        let riley = CalPartner(calendarID: own, ownerID: them, name: "Riley")
+        server.externalPartner(riley)
         await engine.refresh()
         let jordan = try #require(engine.myPartners(of: pair).first)
         #expect(jordan.ownerID == me && jordan.name == "Jordan")
         #expect(engine.myPartners(of: pair).map(\.name) == ["Jordan"])
-        #expect(Set(engine.partners(of: pair).map(\.name)) == ["Cole", "Jordan"])
+        #expect(Set(engine.partners(of: pair).map(\.name)) == ["Riley", "Jordan"])
         // Their partner is no default of mine, and I can't change it.
-        engine.setDefaultPartner(cole.id, in: pair)
+        engine.setDefaultPartner(riley.id, in: pair)
         #expect(engine.defaultPartner(in: pair) == nil)
         engine.setDefaultPartner(nil, in: pair)
-        var renamed = try #require(engine.partners(of: pair).first { $0.id == cole.id })
-        renamed.name = "Nicole"
+        var renamed = try #require(engine.partners(of: pair).first { $0.id == riley.id })
+        renamed.name = "Rylee"
         engine.savePartner(renamed)
         await engine.refresh()
         #expect(engine.notices.count == 1)
-        #expect(server.get { $0.partners[cole.id]?.name } == "Cole")
+        #expect(server.get { $0.partners[riley.id]?.name } == "Riley")
 
         // An entry for them, with their partner: saved, and the heart is theirs.
         var c = CalPrivateContent(at: nov16)
         c.subjectID = them
-        c.partnerIDs = [cole.id]
+        c.partnerIDs = [riley.id]
         engine.savePrivate(CalPrivateEntry(calendarID: own, content: c, createdBy: me))
         await engine.refresh()
         let entry = try #require(engine.privateEntries(from: CalDate(2026, 11, 16), through: CalDate(2026, 11, 16), zone: chicago).first)
@@ -170,7 +170,7 @@ struct PrivateEntryTests {
         #expect(engine.hearts([entry]).map(\.author) == [them])
         // Mine naming their partner: refused, gone.
         var wrong = CalPrivateContent(at: nov16)
-        wrong.partnerIDs = [cole.id]
+        wrong.partnerIDs = [riley.id]
         engine.savePrivate(CalPrivateEntry(calendarID: own, content: wrong, createdBy: me))
         await engine.refresh()
         #expect(engine.privateEntries(from: CalDate(2026, 11, 16), through: CalDate(2026, 11, 16), zone: chicago).count == 1)
@@ -199,9 +199,9 @@ struct PrivateEntryTests {
     /// an author's entries name partners of one color, else the author's.
     @Test func heartsArePerAuthorInThePartnersColorElseTheAuthors() {
         let me = UUID(), them = UUID(), cal = UUID()
-        let cole = CalPartner(calendarID: cal, name: "Cole", color: .orange)
+        let riley = CalPartner(calendarID: cal, name: "Riley", color: .orange)
         let sam = CalPartner(calendarID: cal, name: "Sam")
-        let partners = [cole.id: cole, sam.id: sam]
+        let partners = [riley.id: riley, sam.id: sam]
         func e(_ by: UUID, _ ps: [UUID], quick: Bool = false) -> CalPrivateEntry {
             var c = CalPrivateContent(at: Date(timeIntervalSince1970: 0))
             c.partnerIDs = ps
@@ -209,17 +209,17 @@ struct PrivateEntryTests {
             return CalPrivateEntry(calendarID: cal, content: c, createdBy: by)
         }
         let color: (CalPrivateEntry) -> CalColor = { $0.createdBy == me ? .indigo : .teal }
-        // Mine with Cole (orange) twice: one orange heart, count 2.
-        var h = CalHeart.hearts([e(me, [cole.id]), e(me, [cole.id])], partners: partners, authorColor: color)
+        // Mine with Riley (orange) twice: one orange heart, count 2.
+        var h = CalHeart.hearts([e(me, [riley.id]), e(me, [riley.id])], partners: partners, authorColor: color)
         #expect(h.count == 1 && h[0].color == .orange && h[0].count == 2)
         // Sam has no color: the author's.
         h = CalHeart.hearts([e(me, [sam.id])], partners: partners, authorColor: color)
         #expect(h[0].color == .indigo)
         // Mixed partners in one author's day: the author's.
-        h = CalHeart.hearts([e(me, [cole.id]), e(me, [sam.id])], partners: partners, authorColor: color)
+        h = CalHeart.hearts([e(me, [riley.id]), e(me, [sam.id])], partners: partners, authorColor: color)
         #expect(h[0].color == .indigo)
         // Both members log: two hearts, the other's in the pair's color.
-        h = CalHeart.hearts([e(me, [cole.id]), e(them, [])], partners: partners, authorColor: color)
+        h = CalHeart.hearts([e(me, [riley.id]), e(them, [])], partners: partners, authorColor: color)
         #expect(h.count == 2)
         #expect(h.first { $0.author == them }?.color == .teal && h.first { $0.author == them }?.hollow == true)
     }

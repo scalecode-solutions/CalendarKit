@@ -183,6 +183,7 @@ public struct CalendarView: View {
                             privateSheet = .new(day: today, pairs: PrivateIndex.intimatePairs(engine: engine, scope: s)
                                 .filter { !$0.frozen }.map(\.id))
                         },
+                        newPrivateFor: { c in privateSheet = .new(day: today, pairs: [c.id], for: c.otherID) },
                         periodDay: today,
                         label: AnyView(plusGlyph))
                     .buttonStyle(.glassProminent)

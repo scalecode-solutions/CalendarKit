@@ -262,6 +262,9 @@ public struct ConnectCalendarTransport: CalendarTransport {
         req.name = p.name
         req.color = p.color.rawValue
         req.archived = p.archived
+        // Always its current flag: proto3 can't tell unset from false, and a
+        // save without it clears the default.
+        req.isDefault = p.isDefault && !p.archived
         return try Wire.partner(value(await client.saveIntimatePartner(request: req, headers: try await headers())).partner)
     }
 
@@ -534,7 +537,7 @@ enum Wire {
     static func partner(_ w: Calendar_V1_IntimatePartner) throws -> CalPartner {
         CalPartner(id: try uuid(w.id), calendarID: try uuid(w.calendarID), ownerID: UUID(uuidString: w.ownerID),
                    name: w.name, color: color(w.color),
-                   archived: w.archived, rev: w.rev, deleted: w.deleted)
+                   archived: w.archived, isDefault: w.isDefault, rev: w.rev, deleted: w.deleted)
     }
 
     static func label(_ w: Calendar_V1_Label) throws -> CalLabel {

@@ -547,6 +547,16 @@ final class FakeServer: CalendarTransport, Sendable {
             } else {
                 saved.ownerID = s.me
             }
+            // One default per owner per pair, never an archived one: the
+            // previous default is cleared, with a rev of its own.
+            saved.isDefault = p.isDefault && !p.archived
+            if saved.isDefault {
+                for (id, var q) in s.partners where id != p.id && q.calendarID == p.calendarID && q.ownerID == saved.ownerID && q.isDefault {
+                    q.isDefault = false
+                    q.rev = bumpPrivate(&s, p.calendarID)
+                    s.partners[id] = q
+                }
+            }
             saved.rev = bumpPrivate(&s, p.calendarID)
             s.partners[p.id] = saved
             return saved

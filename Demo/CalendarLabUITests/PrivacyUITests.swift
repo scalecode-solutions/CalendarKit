@@ -72,9 +72,10 @@ final class PrivacyUITests: XCTestCase {
         waitFor(intimateState, label: "turned it on")
         shot("p1-waiting-for-me")
 
-        // On: on for both, and the partner list appears.
+        // On: on for both (the line goes; the switch says it), and my
+        // partner list appears.
         intimate.switches.firstMatch.exists ? intimate.switches.firstMatch.tap() : intimate.tap()
-        waitFor(intimateState, label: "On for both")
+        XCTAssert(intimateState.waitForNonExistence(timeout: 10), "a line under the switch when both are on")
         let name = app.textFields["privacy.partner.name"]
         XCTAssert(reveal(name).exists)
         name.tap()
@@ -115,12 +116,14 @@ final class PrivacyUITests: XCTestCase {
         // With no partners left there's no default to pick.
         XCTAssert(app.buttons["privacy.partner.default"].waitForNonExistence(timeout: 5), "a default with no partners")
 
-        // Cycle: on for both, then my own settings behind "Track my cycle too".
+        // Cycle is each person's own (MVCALE-51): the friend tracks theirs
+        // already, so their settings show; Track my cycle adds mine.
         let cycle = reveal(app.switches["privacy.cycle"])
         let cycleState = app.staticTexts["privacy.cycle.state"]
+        waitFor(cycleState, label: "tracks theirs here")
+        XCTAssert(app.buttons["privacy.cycleLength.them"].firstMatch.exists, "the friend's cycle settings don't show")
+        XCTAssertFalse(app.buttons["privacy.cycleLength.me"].firstMatch.exists, "my settings show before I track")
         cycle.switches.firstMatch.exists ? cycle.switches.firstMatch.tap() : cycle.tap()
-        waitFor(cycleState, label: "On for both")
-        reveal(app.buttons["privacy.cycle.mine"]).tap()
         let length = reveal(app.buttons["privacy.cycleLength.me"].firstMatch)
         XCTAssert(length.label.contains("Automatic"), length.label)
         length.tap()

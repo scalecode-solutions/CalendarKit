@@ -81,6 +81,7 @@ struct DayView: View {
                     AddMenu(engine: engine, appearance: appearance, intimate: intimate, cycle: cycle,
                             canAddEvent: canAdd, newEvent: { editor = .new(day, in: inPair) },
                             newPrivate: { privateSheet = .new(day: day, pairs: intimate.map(\.id)) },
+                            newPrivateFor: { c in privateSheet = .new(day: day, pairs: [c.id], for: c.otherID) },
                             periodDay: day, label: AnyView(Image(systemName: "plus")))
                 }
             }

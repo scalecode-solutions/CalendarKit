@@ -275,8 +275,9 @@ struct PrivateDataTests {
     }
 }
 
-/// The person's default partner per pair (design review, 2026-11-16): on the device,
-/// per account and pair, and gone once that name is removed.
+/// The person's default partner per pair (design review; synced since
+/// MVCALE-51): a flag on the partner, one per owner, never a removed one; and a
+/// default stored on the device by 0.8.0 is sent up once.
 @MainActor
 @Suite("Default partner", .serialized)
 struct DefaultPartnerTests {
@@ -287,25 +288,49 @@ struct DefaultPartnerTests {
         engine.setConsent(try #require(engine.calendar(own)), .intimate, true)
         await engine.refresh()
         let cal = try #require(engine.calendar(own))
-        defer { engine.setDefaultPartner(nil, in: cal) }
         #expect(engine.defaultPartner(in: cal) == nil)
         let jordan = CalPartner(calendarID: own, name: "Jordan", color: .teal)
+        let casey = CalPartner(calendarID: own, name: "Casey")
         engine.savePartner(jordan)
+        engine.savePartner(casey)
         engine.setDefaultPartner(jordan.id, in: cal)
         #expect(engine.defaultPartner(in: cal) == jordan.id)
-        // Another account on this device has its own.
-        let other = CalendarEngine(config: CalendarConfig(baseURL: URL(string: "http://fake")!, currentUserID: UUID(),
-                                                          tokenProvider: { "t" }), transport: server)
-        #expect(other.defaultPartner(in: cal) == nil)
+        await engine.refresh()
+        #expect(server.get { $0.partners[jordan.id]?.isDefault } == true)
+        // Another one: the old one stops being it, here and on the server.
+        engine.setDefaultPartner(casey.id, in: cal)
+        await engine.refresh()
+        #expect(engine.defaultPartner(in: cal) == casey.id)
+        #expect(server.get { s in s.partners.values.filter(\.isDefault).map(\.id) } == [casey.id])
+        // Synced: the other member's phone knows it (Intimate for <name>).
+        #expect(engine.defaultPartner(of: engine.config.currentUserID, in: cal) == casey.id)
         // Removed (archived): no longer the default.
-        var removed = jordan
+        var removed = try #require(engine.myPartners(of: cal).first { $0.id == casey.id })
         removed.archived = true
         engine.savePartner(removed)
+        await engine.refresh()
         #expect(engine.defaultPartner(in: cal) == nil)
+        #expect(server.get { $0.partners[casey.id]?.isDefault } == false)
         // A name that isn't on the list at all isn't either.
         engine.setDefaultPartner(UUID(), in: cal)
         #expect(engine.defaultPartner(in: cal) == nil)
-        engine.setDefaultPartner(nil, in: cal)
-        #expect(UserDefaults.standard.string(forKey: CalendarEngine.defaultPartnerKey(engine.config.currentUserID, own)) == nil)
+    }
+
+    /// A default 0.8.0 kept on the device goes up with the first sync, once.
+    @Test func aDeviceDefaultIsSentUpOnce() async throws {
+        let (engine, server, own) = makeEngine()
+        server.externalConsent(own, true)
+        await engine.refresh()
+        engine.setConsent(try #require(engine.calendar(own)), .intimate, true)
+        let jordan = CalPartner(calendarID: own, name: "Jordan")
+        engine.savePartner(jordan)
+        await engine.refresh()
+        let key = CalendarEngine.legacyDefaultPartnerKey(engine.config.currentUserID, own)
+        UserDefaults.standard.set(jordan.id.uuidString, forKey: key)
+        await engine.refresh()
+        await engine.refresh()
+        #expect(UserDefaults.standard.string(forKey: key) == nil)
+        #expect(server.get { $0.partners[jordan.id]?.isDefault } == true)
+        #expect(engine.defaultPartner(in: try #require(engine.calendar(own))) == jordan.id)
     }
 }

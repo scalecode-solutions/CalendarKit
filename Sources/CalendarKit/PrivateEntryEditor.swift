@@ -64,9 +64,8 @@ struct PrivateEntryEditor: View {
             }
             var c = CalPrivateContent(at: at, timeZone: zone.identifier)
             c.subjectID = subject
-            // Your own entry starts with your default partner, if you set one.
-            if subject == nil, let first = pairs.first.flatMap({ engine.calendar($0) }), let p = engine.defaultPartner(in: first) {
-                c.partnerIDs = [p]
+            if let first = pairs.first.flatMap({ engine.calendar($0) }) {
+                c.partnerIDs = Self.startingWho(engine: engine, pair: first, subject: subject).map { [$0] } ?? []
             }
             _content = State(initialValue: c)
             _calendarID = State(initialValue: pairs.first)
@@ -107,6 +106,20 @@ struct PrivateEntryEditor: View {
         existing?.subject ?? content.subjectID ?? engine.config.currentUserID
     }
     private var forOther: Bool { subject != engine.config.currentUserID }
+
+    /// Who a new entry starts with (design review, MVCALE-51): the subject's
+    /// default partner (synced, so "Intimate for <name>" knows theirs).
+    static func startingWho(engine: CalendarEngine, pair: CalCalendar, subject: UUID?) -> UUID? {
+        engine.defaultPartner(of: subject ?? engine.config.currentUserID, in: pair)
+    }
+
+    /// "Not set" is offered only while there's nothing to start from: with a
+    /// default (or their one partner) Who is simply which partner.
+    private var offersNotSet: Bool {
+        guard let pair else { return true }
+        return content.partnerIDs.isEmpty
+            || Self.startingWho(engine: engine, pair: pair, subject: forOther ? subject : nil) == nil
+    }
     /// The names offered (MVCALE-51): the subject's own current list, never
     /// the other member's, so nobody picks themselves; plus whoever this entry
     /// already names, so it reads as it is. Either of you may edit it (plan
@@ -141,7 +154,7 @@ struct PrivateEntryEditor: View {
         .onChange(of: calendarID) { _, id in
             guard existing == nil, let c = id.flatMap({ engine.calendar($0) }) else { return }
             content.solo = false
-            content.partnerIDs = content.subjectID == nil ? (engine.defaultPartner(in: c).map { [$0] } ?? []) : []
+            content.partnerIDs = Self.startingWho(engine: engine, pair: c, subject: content.subjectID).map { [$0] } ?? []
             content.finishedInside = [:]
         }
         .scrollContentBackground(.hidden)
@@ -219,7 +232,11 @@ struct PrivateEntryEditor: View {
     private var whoSection: some View {
         Section {
             // Solo is a switch of its own, above Who (MVCALE-51).
-            Toggle("Solo", isOn: Binding(get: { content.solo }, set: { who.wrappedValue = $0 ? .solo : .notSet }))
+            Toggle("Solo", isOn: Binding(get: { content.solo }, set: { on in
+                // Off again: back to whoever it starts with (the default).
+                let start = pair.flatMap { Self.startingWho(engine: engine, pair: $0, subject: forOther ? subject : nil) }
+                who.wrappedValue = on ? .solo : start.map(Who.partner) ?? .notSet
+            }))
                 .accessibilityIdentifier("solo")
             if !content.solo { whoPicker }
         } footer: {
@@ -233,7 +250,7 @@ struct PrivateEntryEditor: View {
 
     @ViewBuilder private var whoPicker: some View {
             Picker("Who", selection: who) {
-                Text("Not set").tag(Who.notSet)
+                if offersNotSet { Text("Not set").tag(Who.notSet) }
                 if content.partnerIDs.count > 1 {
                     Text(PrivateEntryRow.names(content.partnerIDs, partners: partners)).tag(Who.several(content.partnerIDs))
                 }

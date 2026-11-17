@@ -56,12 +56,26 @@ final class IntimacyUITests: XCTestCase {
         option.tap()
     }
 
+    func waitForOn(_ s: XCUIElement) {
+        let p = NSPredicate(format: "value == '1'")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: p, object: s)], timeout: 10), .completed,
+                       "\(s) never turned on")
+    }
+
+    /// Solo is its own switch, above Who (MVCALE-51).
+    func turnOnSolo() {
+        let solo = app.switches["solo"].firstMatch
+        XCTAssert(solo.waitForExistence(timeout: 5), "no Solo switch")
+        if (solo.value as? String) != "1" { flip(solo) }
+        waitForOn(solo)
+    }
+
     func flip(_ s: XCUIElement) {
         s.switches.firstMatch.exists ? s.switches.firstMatch.tap() : s.tap()
     }
 
     /// Our two consents on, through the privacy sheet, then back to the month.
-    func consentToBoth() {
+    func consentToBoth(defaultPartner: String? = nil) {
         // A pair's settings live with the conversation (design review, 2026-11-16):
         // Chats → the friend → tap the name → Calendar → Privacy.
         let friend = ProcessInfo.processInfo.environment["CONSENT_FROM"]!.lowercased()
@@ -81,13 +95,25 @@ final class IntimacyUITests: XCTestCase {
         let intimate = app.switches["privacy.intimate"]
         XCTAssert(intimate.waitForExistence(timeout: 5))
         // An earlier test in the run may have turned them on already: flip only what's off.
-        let intimateState = app.staticTexts["privacy.intimate.state"]
-        if !intimateState.label.contains("On for both") { flip(intimate) }
-        waitFor(intimateState, label: "On for both")
+        // The friend's are on already (CONSENT_FROM); a switch's value says ours.
+        if (intimate.value as? String) != "1" { flip(intimate) }
+        waitForOn(intimate)
         let cycle = reveal(app.switches["privacy.cycle"])
-        let cycleState = app.staticTexts["privacy.cycle.state"]
-        if !cycleState.label.contains("On for both") { flip(cycle) }
-        waitFor(cycleState, label: "On for both")
+        if (cycle.value as? String) != "1" { flip(cycle) }
+        waitForOn(cycle)
+        if let partner = defaultPartner {
+            // One of my own, and my default (MVCALE-51).
+            let field = reveal(app.textFields["privacy.partner.name"])
+            field.tap()
+            field.typeText(partner)
+            app.buttons["privacy.partner.add"].tap()
+            XCTAssert(app.buttons["privacy.partner.\(partner)"].firstMatch.waitForExistence(timeout: 5), "the partner wasn't added")
+            reveal(app.buttons["privacy.partner.default"].firstMatch).tap()
+            let choice = app.buttons[partner].firstMatch
+            XCTAssert(choice.waitForExistence(timeout: 5), "the partner isn't offered as the default")
+            choice.tap()
+            waitFor(app.buttons["privacy.partner.default"].firstMatch, label: partner)
+        }
         // Back to the conversation, then its calendar.
         for _ in 0..<3 where !app.buttons["conversation.calendar"].exists {
             app.navigationBars.buttons.element(boundBy: 0).tap()
@@ -131,6 +157,30 @@ final class IntimacyUITests: XCTestCase {
         XCTAssert(today.exists, "not back on the month")
     }
 
+    /// With a default partner (design review, MVCALE-51): + → Intimate starts
+    /// with it, Who has no "Not set", and a quick log is a filled heart.
+    /// Named to run last (XCTest goes alphabetically): it leaves a partner
+    /// and a default behind, which the other tests don't expect.
+    func testWithADefaultPartnerEveryNewEntryStartsWithIt() {
+        app.terminate()
+        app.launch()
+        consentToBoth(defaultPartner: "UI Pat")
+        XCTAssert(today.waitForExistence(timeout: 5))
+        app.buttons["addMenu"].tap()
+        let intimate = app.buttons["Intimate"].firstMatch
+        XCTAssert(intimate.waitForExistence(timeout: 5), "no Intimate in +")
+        intimate.tap()
+        let who = app.buttons["who"].firstMatch
+        XCTAssert(who.waitForExistence(timeout: 5), "no Who")
+        XCTAssert(who.label.contains("UI Pat") || (who.value as? String)?.contains("UI Pat") == true, "Who didn't start with the default: \(who.label)")
+        who.tap()
+        XCTAssert(app.buttons["UI Pat"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Not set"].exists, "Not set offered beside a default")
+        shot("i6-who-default")
+        app.buttons["UI Pat"].firstMatch.tap()
+        app.buttons["Cancel"].tap()
+    }
+
     /// + → Quick log: today gets a private entry, hollow until who is set; the
     /// day view lists it, Solo fills it in, Delete removes it.
     func testQuickLogFillInAndDelete() {
@@ -153,18 +203,18 @@ final class IntimacyUITests: XCTestCase {
         XCTAssertFalse(entry.label.contains("Quick log") || entry.label.contains("Who"), "VoiceOver says more than 'Private entry': \(entry.label)")
         shot("i2-day")
         entry.tap()
-        XCTAssert(app.staticTexts["Pick who, or Solo. Until then it shows as a hollow heart."].waitForExistence(timeout: 5),
+        XCTAssert(app.staticTexts["Turn on Solo or pick who. Until then it shows as a hollow heart."].waitForExistence(timeout: 5),
                   "a quick log doesn't ask who")
-        chooseWho("Solo")
+        turnOnSolo()
         app.buttons["Save"].tap()
 
         // Reopened: who is set, so the prompt is gone.
         XCTAssert(entry.waitForExistence(timeout: 5))
         entry.tap()
-        let who = app.buttons["who"].firstMatch
-        XCTAssert(who.waitForExistence(timeout: 5))
-        XCTAssert(who.label.contains("Solo") || (who.value as? String) == "Solo", "Solo didn't stick: \(who.label)")
-        XCTAssertFalse(app.staticTexts["Pick who, or Solo. Until then it shows as a hollow heart."].exists)
+        let solo = app.switches["solo"].firstMatch
+        XCTAssert(solo.waitForExistence(timeout: 5))
+        XCTAssertEqual(solo.value as? String, "1", "Solo didn't stick")
+        XCTAssertFalse(app.staticTexts["Turn on Solo or pick who. Until then it shows as a hollow heart."].exists)
         reveal(app.buttons["Delete entry"]).tap()
         let confirm = app.buttons["Delete"].firstMatch
         XCTAssert(confirm.waitForExistence(timeout: 5), "no delete confirmation")
@@ -189,7 +239,7 @@ final class IntimacyUITests: XCTestCase {
         intimate.tap()
         XCTAssertFalse(app.buttons["Add a partner"].exists, "the editor still adds partners")
         XCTAssert(app.staticTexts["noPartners"].waitForExistence(timeout: 5), "no line saying where partners are added")
-        chooseWho("Solo")
+        turnOnSolo()
         shot("i3-editor-no-partners")
         app.buttons["Save"].tap()
         waitForCount(before + 1)

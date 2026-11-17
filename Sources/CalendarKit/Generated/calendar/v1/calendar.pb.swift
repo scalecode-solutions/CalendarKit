@@ -1347,7 +1347,7 @@ public nonisolated struct Calendar_V1_IntimateContent: @unchecked Sendable {
   }
 
   /// Whose encounter it is (MVCALE-51): one of the pair's two members, who
-  /// needn't be whoever logged it ("I know she was with Cole on Friday").
+  /// needn't be whoever logged it (one member logging the other's encounter).
   /// partner_ids come from the subject's own list. "" = created_by.
   public var subjectID: String {
     get {_storage._subjectID}
@@ -1422,6 +1422,10 @@ public nonisolated struct Calendar_V1_IntimatePartner: Sendable {
   /// every partner (the other's entries need names), but each picks from their
   /// own. "" = added before owners existed and never given one: nobody's.
   public var ownerID: String = String()
+
+  /// The owner's default partner in this pair: new entries start with it
+  /// (MVCALE-51). At most one per owner per pair; never an archived one.
+  public var isDefault: Bool = false
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1517,6 +1521,11 @@ public nonisolated struct Calendar_V1_SaveIntimatePartnerRequest: Sendable {
   public var color: String = String()
 
   public var archived: Bool = false
+
+  /// Make it the caller's default in the pair (clearing their old one), or
+  /// not. Send the current value on every save: false clears it. Archiving
+  /// clears it whatever this says.
+  public var isDefault: Bool = false
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -3847,7 +3856,7 @@ nonisolated extension Calendar_V1_IntimateEntry: SwiftProtobuf.Message, SwiftPro
 
 nonisolated extension Calendar_V1_IntimatePartner: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".IntimatePartner"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}calendar_id\0\u{1}name\0\u{1}color\0\u{1}archived\0\u{1}rev\0\u{1}deleted\0\u{3}owner_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}calendar_id\0\u{1}name\0\u{1}color\0\u{1}archived\0\u{1}rev\0\u{1}deleted\0\u{3}owner_id\0\u{3}is_default\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -3863,6 +3872,7 @@ nonisolated extension Calendar_V1_IntimatePartner: SwiftProtobuf.Message, SwiftP
       case 6: try { try decoder.decodeSingularInt64Field(value: &self.rev) }()
       case 7: try { try decoder.decodeSingularBoolField(value: &self.deleted) }()
       case 8: try { try decoder.decodeSingularStringField(value: &self.ownerID) }()
+      case 9: try { try decoder.decodeSingularBoolField(value: &self.isDefault) }()
       default: break
       }
     }
@@ -3893,6 +3903,9 @@ nonisolated extension Calendar_V1_IntimatePartner: SwiftProtobuf.Message, SwiftP
     if !self.ownerID.isEmpty {
       try visitor.visitSingularStringField(value: self.ownerID, fieldNumber: 8)
     }
+    if self.isDefault != false {
+      try visitor.visitSingularBoolField(value: self.isDefault, fieldNumber: 9)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -3905,6 +3918,7 @@ nonisolated extension Calendar_V1_IntimatePartner: SwiftProtobuf.Message, SwiftP
     if lhs.rev != rhs.rev {return false}
     if lhs.deleted != rhs.deleted {return false}
     if lhs.ownerID != rhs.ownerID {return false}
+    if lhs.isDefault != rhs.isDefault {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -4060,7 +4074,7 @@ nonisolated extension Calendar_V1_DeleteIntimateEntryResponse: SwiftProtobuf.Mes
 
 nonisolated extension Calendar_V1_SaveIntimatePartnerRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SaveIntimatePartnerRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}calendar_id\0\u{1}name\0\u{1}color\0\u{1}archived\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}calendar_id\0\u{1}name\0\u{1}color\0\u{1}archived\0\u{3}is_default\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -4073,6 +4087,7 @@ nonisolated extension Calendar_V1_SaveIntimatePartnerRequest: SwiftProtobuf.Mess
       case 3: try { try decoder.decodeSingularStringField(value: &self.name) }()
       case 4: try { try decoder.decodeSingularStringField(value: &self.color) }()
       case 5: try { try decoder.decodeSingularBoolField(value: &self.archived) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self.isDefault) }()
       default: break
       }
     }
@@ -4094,6 +4109,9 @@ nonisolated extension Calendar_V1_SaveIntimatePartnerRequest: SwiftProtobuf.Mess
     if self.archived != false {
       try visitor.visitSingularBoolField(value: self.archived, fieldNumber: 5)
     }
+    if self.isDefault != false {
+      try visitor.visitSingularBoolField(value: self.isDefault, fieldNumber: 6)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -4103,6 +4121,7 @@ nonisolated extension Calendar_V1_SaveIntimatePartnerRequest: SwiftProtobuf.Mess
     if lhs.name != rhs.name {return false}
     if lhs.color != rhs.color {return false}
     if lhs.archived != rhs.archived {return false}
+    if lhs.isDefault != rhs.isDefault {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

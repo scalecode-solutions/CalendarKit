@@ -30,7 +30,7 @@ public struct CalPrivateContent: Equatable, Sendable, Codable {
     public var quickLog = false
     public var positions: [String] = []
     /// Whose encounter it is (MVCALE-51): either member may log one for the
-    /// other ("I know she was with Cole on Friday"). nil: whoever logged it.
+    /// other (one member logging the other's encounter). nil: whoever logged it.
     public var subjectID: UUID?
 
     public init(at: Date, timeZone: String = TimeZone.current.identifier) {
@@ -83,19 +83,43 @@ public struct CalPartner: Identifiable, Equatable, Sendable, Codable {
     /// .none: the heart falls back to whoever logged the entry.
     public var color: CalColor
     public var archived: Bool
+    /// Its owner's default (MVCALE-51): their new entries and quick logs, and
+    /// the other member's "Intimate for", start with it. One per owner per
+    /// pair; the server clears the old one. Never an archived one.
+    public var isDefault: Bool
     public var rev: Int64
     public var deleted: Bool
 
     public init(id: UUID = UUID(), calendarID: UUID, ownerID: UUID? = nil, name: String, color: CalColor = .none,
-                archived: Bool = false, rev: Int64 = 0, deleted: Bool = false) {
+                archived: Bool = false, isDefault: Bool = false, rev: Int64 = 0, deleted: Bool = false) {
         self.id = id
         self.calendarID = calendarID
         self.ownerID = ownerID
         self.name = name
         self.color = color
         self.archived = archived
+        self.isDefault = isDefault
         self.rev = rev
         self.deleted = deleted
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, calendarID, ownerID, name, color, archived, isDefault, rev, deleted
+    }
+
+    /// Stored partners from before owners or defaults read as nobody's and
+    /// not a default.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        calendarID = try c.decode(UUID.self, forKey: .calendarID)
+        ownerID = try c.decodeIfPresent(UUID.self, forKey: .ownerID)
+        name = try c.decode(String.self, forKey: .name)
+        color = try c.decode(CalColor.self, forKey: .color)
+        archived = try c.decode(Bool.self, forKey: .archived)
+        isDefault = try c.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
+        rev = try c.decode(Int64.self, forKey: .rev)
+        deleted = try c.decode(Bool.self, forKey: .deleted)
     }
 }
 

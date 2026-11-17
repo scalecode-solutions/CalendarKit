@@ -359,6 +359,7 @@ public final class CalendarEngine {
                 if !page.deltas.contains(where: { $0.hasMore || $0.privateDelta.hasMore || $0.cycleDelta.hasMore }) { break }
             }
             store.lastSync = Date()
+            moveLegacyDefaults()
             store.save()
             lastError = nil
             loadState = .loaded
@@ -1127,28 +1128,46 @@ public final class CalendarEngine {
     }
 
     /// The person's own default partner on a pair: new entries and quick logs
-    /// start with it (design review, 2026-11-16). On this device, per account and pair,
-    /// like Opens on; nil when unset or when that name was removed.
+    /// start with it. Synced (MVCALE-51): it's a flag on the partner, so both
+    /// phones know it. nil when unset or removed.
     public func defaultPartner(in calendar: CalCalendar) -> UUID? {
-        _ = defaultPartnerChanges
-        guard let raw = UserDefaults.standard.string(forKey: Self.defaultPartnerKey(config.currentUserID, calendar.id)),
-              let id = UUID(uuidString: raw) else { return nil }
-        return myPartners(of: calendar).contains { $0.id == id && !$0.archived } ? id : nil
+        defaultPartner(of: config.currentUserID, in: calendar)
     }
 
-    /// nil: no default (new entries start with who unset).
+    /// Anyone's default on a pair: "Intimate for <name>" starts with theirs.
+    public func defaultPartner(of person: UUID, in calendar: CalCalendar) -> UUID? {
+        partners(of: calendar).first { $0.ownerID == person && $0.isDefault && !$0.archived }?.id
+    }
+
+    /// Make one of your partners your default (nil: none). Saved like any
+    /// change to it; the server clears your previous default.
     public func setDefaultPartner(_ id: UUID?, in calendar: CalCalendar) {
-        let key = Self.defaultPartnerKey(config.currentUserID, calendar.id)
-        if let id { UserDefaults.standard.set(id.uuidString, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
-        defaultPartnerChanges += 1
+        for p in myPartners(of: calendar) {
+            let want = p.id == id && !p.archived
+            guard p.isDefault != want else { continue }
+            var q = p
+            q.isDefault = want
+            savePartner(q)
+        }
     }
 
-    static func defaultPartnerKey(_ me: UUID, _ pair: UUID) -> String {
+    /// Before defaults synced, they lived on the device (0.8.0): the first sync
+    /// with the new build sends a stored one up once, then forgets it.
+    static func legacyDefaultPartnerKey(_ me: UUID, _ pair: UUID) -> String {
         "CalendarKit.defaultPartner.\(me.uuidString.lowercased()).\(pair.uuidString.lowercased())"
     }
 
-    /// Bumped by setDefaultPartner so views reading defaultPartner redraw.
-    private var defaultPartnerChanges = 0
+    private func moveLegacyDefaults() {
+        let me = config.currentUserID
+        for c in calendars where c.intimateOn && !c.frozen {
+            let key = Self.legacyDefaultPartnerKey(me, c.id)
+            guard let raw = UserDefaults.standard.string(forKey: key) else { continue }
+            UserDefaults.standard.removeObject(forKey: key)
+            guard defaultPartner(in: c) == nil, let id = UUID(uuidString: raw),
+                  myPartners(of: c).contains(where: { $0.id == id && !$0.archived }) else { continue }
+            setDefaultPartner(id, in: c)
+        }
+    }
 
     /// The person's own partners on a pair (MVCALE-51): what the editor's
     /// Who, Privacy and the default offer. The other member's, and any from
