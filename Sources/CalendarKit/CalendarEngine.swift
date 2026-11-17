@@ -1162,9 +1162,14 @@ public final class CalendarEngine {
         for c in calendars where c.intimateOn && !c.frozen {
             let key = Self.legacyDefaultPartnerKey(me, c.id)
             guard let raw = UserDefaults.standard.string(forKey: key) else { continue }
+            let id = UUID(uuidString: raw)
+            let partner = partners(of: c).first { $0.id == id }
+            // Not owned by anyone yet (the server's owners not assigned): keep
+            // the key and try again on a later sync (Leaf's review).
+            if let partner, partner.ownerID == nil, !partner.archived { continue }
             UserDefaults.standard.removeObject(forKey: key)
-            guard defaultPartner(in: c) == nil, let id = UUID(uuidString: raw),
-                  myPartners(of: c).contains(where: { $0.id == id && !$0.archived }) else { continue }
+            guard defaultPartner(in: c) == nil, let id, let partner,
+                  partner.ownerID == me, !partner.archived else { continue }
             setDefaultPartner(id, in: c)
         }
     }

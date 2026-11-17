@@ -333,4 +333,28 @@ struct DefaultPartnerTests {
         #expect(server.get { $0.partners[jordan.id]?.isDefault } == true)
         #expect(engine.defaultPartner(in: try #require(engine.calendar(own))) == jordan.id)
     }
+
+    /// A stored default naming a partner nobody owns yet (the server's owners
+    /// not assigned) is kept until it is, then sent up.
+    @Test func aDeviceDefaultWaitsForItsOwner() async throws {
+        let (engine, server, own) = makeEngine()
+        server.externalConsent(own, true)
+        await engine.refresh()
+        engine.setConsent(try #require(engine.calendar(own)), .intimate, true)
+        await engine.refresh()
+        let casey = CalPartner(calendarID: own, ownerID: nil, name: "Casey")
+        server.externalPartner(casey)
+        let key = CalendarEngine.legacyDefaultPartnerKey(engine.config.currentUserID, own)
+        UserDefaults.standard.set(casey.id.uuidString, forKey: key)
+        await engine.refresh()
+        #expect(UserDefaults.standard.string(forKey: key) == casey.id.uuidString)
+        // The owners are assigned (the server's one-off): now it goes up.
+        var owned = casey
+        owned.ownerID = engine.config.currentUserID
+        server.externalPartner(owned)
+        await engine.refresh()
+        await engine.refresh()
+        #expect(UserDefaults.standard.string(forKey: key) == nil)
+        #expect(server.get { $0.partners[casey.id]?.isDefault } == true)
+    }
 }
