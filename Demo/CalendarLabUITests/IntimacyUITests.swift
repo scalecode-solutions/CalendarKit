@@ -181,6 +181,23 @@ final class IntimacyUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Not set"].exists, "Not set offered beside a default")
         shot("i6-who-default")
         app.buttons["UI Pat"].firstMatch.tap()
+        // For the other member (MVCALE-53): Who starts over from their list,
+        // and they have none, so it says so; back to You brings the default.
+        let forWho = app.buttons["for"].firstMatch
+        XCTAssert(forWho.waitForExistence(timeout: 5), "no For in the editor")
+        forWho.tap()
+        let options = app.collectionViews.buttons
+        XCTAssert(options.firstMatch.waitForExistence(timeout: 5), "For offers nobody")
+        let other = options.allElementsBoundByIndex.first { $0.label != "You" }
+        XCTAssertNotNil(other, "For doesn't offer the other member")
+        other?.tap()
+        XCTAssert(app.staticTexts["noPartners"].waitForExistence(timeout: 5), "Who kept my partner after For changed")
+        shot("i9-for-them")
+        app.buttons["for"].firstMatch.tap()
+        app.buttons["You"].firstMatch.tap()
+        let whoAgain = app.buttons["who"].firstMatch
+        XCTAssert(whoAgain.waitForExistence(timeout: 5))
+        XCTAssert(whoAgain.label.contains("UI Pat"), "back to You didn't bring the default: \(whoAgain.label)")
         app.buttons["Cancel"].tap()
     }
 

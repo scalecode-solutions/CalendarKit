@@ -84,7 +84,7 @@ public struct CalPartner: Identifiable, Equatable, Sendable, Codable {
     public var color: CalColor
     public var archived: Bool
     /// Its owner's default (MVCALE-51): their new entries and quick logs, and
-    /// the other member's "Intimate for", start with it. One per owner per
+    /// an entry the other member logs For them, start with it. One per owner per
     /// pair; the server clears the old one. Never an archived one.
     public var isDefault: Bool
     public var rev: Int64

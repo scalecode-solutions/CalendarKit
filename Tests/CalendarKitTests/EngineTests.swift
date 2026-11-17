@@ -446,7 +446,10 @@ final class FakeServer: CalendarTransport, Sendable {
             }
             // Grandfathered (Leaf's server): a partner the stored entry already
             // names stays allowed; only newly added ones must be the subject's.
-            let stored = s.privates[e.id].map { Set($0.content.partnerIDs + Array($0.content.finishedInside.keys)) } ?? []
+            // ...and only while the entry's subject stays the same (MVCALE-53).
+            let stored = s.privates[e.id].flatMap { old -> Set<UUID>? in
+                (old.content.subjectID ?? old.createdBy) == subject ? Set(old.content.partnerIDs + Array(old.content.finishedInside.keys)) : nil
+            } ?? []
             for id in e.content.partnerIDs + Array(e.content.finishedInside.keys) where !stored.contains(id) {
                 guard let p = s.partners[id], p.calendarID == e.calendarID, p.ownerID == nil || p.ownerID == subject else {
                     throw CalTransportError.invalid("a partner on this entry isn't on their list")

@@ -103,12 +103,28 @@ struct PrivateEntryEditor: View {
     /// Whose encounter this is: the entry's subject, or for a new one, whoever
     /// it's being logged for (you, unless + said otherwise).
     private var subject: UUID {
-        existing?.subject ?? content.subjectID ?? engine.config.currentUserID
+        content.subjectID ?? existing?.createdBy ?? engine.config.currentUserID
+    }
+
+    /// For: whose encounter it is (MVCALE-53, design review): You or the other
+    /// member, at the top. Changing it starts Who over from that person's
+    /// list and default, and turns Solo off; on an existing entry too, so no
+    /// partner carries across from one person's list to the other's.
+    private var forWho: Binding<UUID> {
+        Binding(get: { subject }, set: { person in
+            guard person != subject else { return }
+            content.subjectID = person
+            content.solo = false
+            content.finishedInside = [:]
+            content.partnerIDs = pair.flatMap {
+                Self.startingWho(engine: engine, pair: $0, subject: person)
+            }.map { [$0] } ?? []
+        })
     }
     private var forOther: Bool { subject != engine.config.currentUserID }
 
     /// Who a new entry starts with (design review, MVCALE-51): the subject's
-    /// default partner (synced, so "Intimate for <name>" knows theirs).
+    /// default partner (synced, so an entry For the other knows theirs).
     static func startingWho(engine: CalendarEngine, pair: CalCalendar, subject: UUID?) -> UUID? {
         engine.defaultPartner(of: subject ?? engine.config.currentUserID, in: pair)
     }
@@ -153,6 +169,7 @@ struct PrivateEntryEditor: View {
         // Another pair chosen for a new entry: its partners, and its default.
         .onChange(of: calendarID) { _, id in
             guard existing == nil, let c = id.flatMap({ engine.calendar($0) }) else { return }
+            content.subjectID = nil // the other member differs from pair to pair: back to You
             content.solo = false
             content.partnerIDs = Self.startingWho(engine: engine, pair: c, subject: content.subjectID).map { [$0] } ?? []
             content.finishedInside = [:]
@@ -181,6 +198,13 @@ struct PrivateEntryEditor: View {
 
     private var whenSection: some View {
         Section {
+            if let pair {
+                Picker("For", selection: forWho) {
+                    Text("You").tag(engine.config.currentUserID)
+                    Text(engine.displayName(pair)).tag(pair.otherID)
+                }
+                .accessibilityIdentifier("for")
+            }
             DatePicker("When", selection: $content.at)
             if pairChoices.count > 1 {
                 Picker("Calendar", selection: $calendarID) {

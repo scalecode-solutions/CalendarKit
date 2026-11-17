@@ -222,6 +222,43 @@ struct PrivateEntryTests {
         #expect(server.get { $0.privates[old.id]?.content.solo } == true)
     }
 
+    /// A grandfathered partner doesn't carry across a change of whose
+    /// encounter it is (MVCALE-53): the server refuses it, as the editor
+    /// clears Who when For changes.
+    @Test func grandfatheringEndsWhenTheSubjectChanges() async throws {
+        let (engine, server, own) = makeEngine()
+        server.externalConsent(own, true)
+        await engine.refresh()
+        let pair = try #require(engine.calendar(own))
+        engine.setConsent(pair, .intimate, true)
+        await engine.refresh()
+        let me = engine.config.currentUserID
+        let riley = CalPartner(calendarID: own, ownerID: pair.otherID, name: "Riley")
+        server.externalPartner(riley)
+        var c = CalPrivateContent(at: nov16)
+        c.partnerIDs = [riley.id]
+        let old = CalPrivateEntry(calendarID: own, content: c, createdBy: me)
+        server.set { s in
+            let r = (s.privateRev[own] ?? 0) + 1
+            s.privateRev[own] = r
+            var e = old
+            e.rev = r
+            s.privates[old.id] = e
+        }
+        await engine.refresh()
+        var e = try #require(engine.privateEntries(from: CalDate(2026, 11, 16), through: CalDate(2026, 11, 16), zone: chicago).first)
+        e.content.subjectID = pair.otherID // now theirs: Riley is theirs, so it's fine
+        engine.savePrivate(e)
+        await engine.refresh()
+        #expect(engine.notices.isEmpty)
+        e = try #require(engine.privateEntries(from: CalDate(2026, 11, 16), through: CalDate(2026, 11, 16), zone: chicago).first)
+        e.content.subjectID = me // back to mine, still naming their Riley: refused
+        engine.savePrivate(e)
+        await engine.refresh()
+        #expect(engine.notices.count == 1)
+        #expect(server.get { $0.privates[old.id]?.content.subjectID } == pair.otherID)
+    }
+
     @Test func aQuickLogIsHollowUntilWhoIsSet() async throws {
         let (engine, server, own) = makeEngine()
         server.externalConsent(own, true)

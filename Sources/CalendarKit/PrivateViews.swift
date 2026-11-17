@@ -273,9 +273,6 @@ struct AddMenu: View {
     let canAddEvent: Bool
     let newEvent: () -> Void
     let newPrivate: () -> Void
-    /// "Intimate for <name>": an entry about the other member, on that pair
-    /// (MVCALE-51).
-    let newPrivateFor: (CalCalendar) -> Void
     /// The day "Log period" writes to (today on the month, the day shown in
     /// the day view); nil leaves it out.
     let periodDay: CalDate?
@@ -289,11 +286,6 @@ struct AddMenu: View {
                 .disabled(!canAddEvent)
             if !intimate.isEmpty {
                 Button(action: newPrivate) { Label("Intimate", systemImage: "heart") }
-                ForEach(intimate) { c in
-                    Button { newPrivateFor(c) } label: {
-                        Label("Intimate for \(engine.displayName(c))", systemImage: "heart.text.square")
-                    }
-                }
                 if intimate.count == 1 {
                     Button { engine.quickLog(in: intimate[0]) } label: { Label("Quick log", systemImage: "bolt.heart") }
                 } else {

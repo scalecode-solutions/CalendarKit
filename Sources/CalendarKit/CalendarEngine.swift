@@ -1160,7 +1160,7 @@ public final class CalendarEngine {
         defaultPartner(of: config.currentUserID, in: calendar)
     }
 
-    /// Anyone's default on a pair: "Intimate for <name>" starts with theirs.
+    /// Anyone's default on a pair: an entry For them starts with theirs.
     public func defaultPartner(of person: UUID, in calendar: CalCalendar) -> UUID? {
         partners(of: calendar).first { $0.ownerID == person && $0.isDefault && !$0.archived }?.id
     }
