@@ -44,7 +44,7 @@ struct PrivateMarks: Equatable {
     static func spoken(_ k: CalCycleDayInfo.Kind) -> String {
         switch k {
         case .logged(.spotting): "spotting"
-        case .logged: "period"
+        case .logged, .inPeriod: "period"
         case .predictedPeriod: "period expected"
         case .fertile(ovulation: true): "ovulation expected"
         case .fertile: "fertile window"
@@ -55,7 +55,7 @@ struct PrivateMarks: Equatable {
     /// logged, then expected period, then ovulation, then the window.
     static func rank(_ k: CalCycleDayInfo.Kind) -> Int {
         switch k {
-        case .logged: 4
+        case .logged, .inPeriod: 4
         case .predictedPeriod: 3
         case .fertile(ovulation: true): 2
         case .fertile: 1
@@ -69,6 +69,7 @@ enum PrivateIndex {
     /// pairs only: the engine returns nothing else).
     static func marks(engine: CalendarEngine, from: CalDate, through: CalDate, zone: TimeZone,
                       scope: CalScope) -> [CalDate: PrivateMarks] {
+        let today = CalDate(Date(), in: zone)
         _ = engine.revision
         guard scope.kind.showsPrivate else { return [:] }
         var out: [CalDate: PrivateMarks] = [:]
@@ -81,7 +82,7 @@ enum PrivateIndex {
                 guard let est = engine.cycle(of: person, in: c) else { continue }
                 var d = from
                 while d <= through {
-                    if let k = est.info(on: d).kind {
+                    if let k = est.info(on: d, today: today).kind {
                         let old = out[d]?.cycle
                         if old.map({ PrivateMarks.rank($0) < PrivateMarks.rank(k) }) ?? true {
                             out[d, default: PrivateMarks()].cycle = k
@@ -137,7 +138,7 @@ struct CycleBand: View {
     private var fill: Color {
         switch kind {
         case .logged(.spotting): CycleBand.period.opacity(0.14)
-        case .logged: CycleBand.period.opacity(0.32)
+        case .logged, .inPeriod: CycleBand.period.opacity(0.32)
         case .predictedPeriod: CycleBand.period.opacity(0.08)
         case .fertile(ovulation: true): CycleBand.fertile.opacity(0.34)
         case .fertile: CycleBand.fertile.opacity(0.16)
@@ -219,7 +220,7 @@ struct DropMark: View {
     static func kind(_ k: CalCycleDayInfo.Kind?) -> Kind? {
         switch k {
         case .logged(.spotting): .spotting
-        case .logged: .logged
+        case .logged, .inPeriod: .logged
         case .predictedPeriod: .expected
         default: nil
         }
@@ -328,8 +329,9 @@ struct AddMenu: View {
     }
 }
 
-/// Spotting · Light · Medium · Heavy for one person on one day, the current
-/// one checked, and None to take it back.
+/// Period started (or ended, inside an open period), then Spotting · Light ·
+/// Medium · Heavy for one person on one day, the current ones checked, and
+/// No flow to take the flow back (the marks stay).
 struct CycleFlowButtons: View {
     let engine: CalendarEngine
     let pair: CalCalendar
@@ -337,7 +339,23 @@ struct CycleFlowButtons: View {
     let day: CalDate
 
     var body: some View {
-        let current = engine.cycle(of: person, in: pair)?.days.last { $0.date == day }
+        let est = engine.cycle(of: person, in: pair)
+        let current = est?.days.last { $0.date == day }
+        let info = est?.info(on: day, today: CalDate(Date(), in: .current))
+        // The two taps a period (MVCALE-52); the flow below is optional.
+        if info?.openPeriod != nil || current?.ends == true {
+            Button {
+                engine.markPeriodEnd(in: pair, for: person, on: day, !(current?.ends ?? false))
+            } label: {
+                if current?.ends == true { Label("Period ended", systemImage: "checkmark") } else { Text("Period ended") }
+            }
+        } else {
+            Button {
+                engine.markPeriodStart(in: pair, for: person, on: day, !(current?.starts ?? false))
+            } label: {
+                if current?.starts == true { Label("Period started", systemImage: "checkmark") } else { Text("Period started") }
+            }
+        }
         ForEach(CalFlow.allCases, id: \.self) { f in
             Button {
                 engine.logCycleDay(in: pair, for: person, on: day, flow: f)
@@ -345,8 +363,8 @@ struct CycleFlowButtons: View {
                 if current?.flow == f { Label(f.title, systemImage: "checkmark") } else { Text(f.title) }
             }
         }
-        if let current {
-            Button("None", role: .destructive) { engine.removeCycleDay(current) }
+        if current?.flow != nil {
+            Button("No flow", role: .destructive) { engine.clearCycleFlow(in: pair, for: person, on: day) }
         }
     }
 }
@@ -477,14 +495,16 @@ struct CycleDaySection: View {
     @State private var legend = false
 
     private var me: UUID { engine.config.currentUserID }
+    private var today: CalDate { CalDate(Date(), in: .current) }
 
     /// Whether the day has a logged day or an estimate for anyone tracked.
     @MainActor static func hasSomething(engine: CalendarEngine, pair: CalCalendar, day: CalDate) -> Bool {
-        engine.cyclePeople(in: pair).contains { engine.cycle(of: $0, in: pair)?.info(on: day).kind != nil }
+        let today = CalDate(Date(), in: .current)
+        return engine.cyclePeople(in: pair).contains { engine.cycle(of: $0, in: pair)?.info(on: day, today: today).kind != nil }
     }
 
     var body: some View {
-        let shown = engine.cyclePeople(in: pair).filter { engine.cycle(of: $0, in: pair)?.info(on: day).kind != nil }
+        let shown = engine.cyclePeople(in: pair).filter { engine.cycle(of: $0, in: pair)?.info(on: day, today: today).kind != nil }
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Label("Cycle", systemImage: "drop.fill")
@@ -508,17 +528,32 @@ struct CycleDaySection: View {
 
     private func personRow(_ person: UUID) -> some View {
         let est = engine.cycle(of: person, in: pair)
-        let kind = est?.info(on: day).kind
+        let info = est?.info(on: day, today: today)
+        let kind = info?.kind
         let logged = est?.days.last { $0.date == day }
+        let isPeriod: Bool = { if case .inPeriod = kind { return true }; if case .logged(let f) = kind { return f != .spotting }; return false }()
         return VStack(alignment: .leading, spacing: 6) {
             Text(name(person)).font(.subheadline.weight(.semibold))
-            if let logged {
-                Text(logged.flow == .spotting ? "Spotting" : "Period").font(.body)
+            if logged != nil || isPeriod {
+                Text(periodLine(logged, info)).font(.body)
                 if !pair.frozen {
+                    if info?.askIfEnded == true {
+                        // Past the usual length and not ended yet: ask, in the app only.
+                        Text("Still on your period?").font(.subheadline)
+                        HStack {
+                            Button("Ended yesterday") { endedYesterday(person) }.cardButton()
+                            Button("Ended today") { engine.markPeriodEnd(in: pair, for: person, on: day) }.cardButton()
+                        }
+                        .accessibilityIdentifier("askIfEnded")
+                    } else if info?.openPeriod != nil && logged?.ends != true {
+                        Button("Ended today") { engine.markPeriodEnd(in: pair, for: person, on: day) }
+                            .cardButton()
+                            .accessibilityIdentifier("endedToday")
+                    }
                     Menu {
                         CycleFlowButtons(engine: engine, pair: pair, person: person, day: day)
                     } label: {
-                        Label("Flow: \(logged.flow.title)", systemImage: "drop.fill")
+                        Label(logged?.flow.map { "Flow: \($0.title)" } ?? "Add flow", systemImage: "drop.fill")
                             .font(.subheadline.weight(.medium))
                     }
                     .accessibilityIdentifier("flowMenu")
@@ -534,6 +569,21 @@ struct CycleDaySection: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// "Period · day 3", "Period · started", "Spotting".
+    private func periodLine(_ logged: CalCycleDay?, _ info: CalCycleDayInfo?) -> String {
+        if logged?.flow == .spotting && logged?.starts != true { return "Spotting" }
+        var parts = ["Period"]
+        if logged?.starts == true { parts.append("started") }
+        else if logged?.ends == true { parts.append("ended") }
+        else if let d = info?.cycleDay { parts.append("day \(d)") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The day before this one was the last.
+    private func endedYesterday(_ person: UUID) {
+        engine.markPeriodEnd(in: pair, for: person, on: day.adding(days: -1))
+    }
+
     /// "Period expected · estimate".
     static func estimate(_ k: CalCycleDayInfo.Kind) -> String {
         let s = PrivateMarks.spoken(k)
@@ -542,7 +592,7 @@ struct CycleDaySection: View {
 
     static func symbol(_ k: CalCycleDayInfo.Kind) -> String {
         switch k {
-        case .logged: "drop.fill"
+        case .logged, .inPeriod: "drop.fill"
         case .predictedPeriod: "drop"
         case .fertile: "circle.dotted"
         }

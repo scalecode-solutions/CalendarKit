@@ -139,4 +139,59 @@ struct CycleEstimatorTests {
     @Test func flowsAndStarting() {
         #expect(CalFlow.allCases.filter(\.startsAPeriod) == [.light, .medium, .heavy])
     }
+
+    // MARK: marked starts and ends (MVCALE-52)
+
+    private func mark(_ m: Int, _ d: Int, starts: Bool = false, ends: Bool = false, flow: CalFlow? = nil) -> CalCycleDay {
+        CalCycleDay(calendarID: cal, personID: person, date: CalDate(2026, m, d), flow: flow, starts: starts, ends: ends)
+    }
+
+    /// Two taps a period: everything between a marked start and end is a
+    /// period day, logged or not, and ended periods set the length.
+    @Test func markedPeriodsFillAndSetTheLength() {
+        let e = CalCycleEstimator(days: [mark(9, 1, starts: true), mark(9, 6, ends: true),
+                                         mark(9, 29, starts: true), mark(10, 4, ends: true, flow: .light)], settings: nil)
+        #expect(e.starts == [CalDate(2026, 9, 1), CalDate(2026, 9, 29)])
+        #expect(e.periodLength == 6)
+        #expect(e.cycleLength == 28)
+        #expect(e.info(on: CalDate(2026, 9, 3)).kind == .inPeriod)
+        #expect(e.info(on: CalDate(2026, 10, 4)).kind == .logged(.light))
+        #expect(e.info(on: CalDate(2026, 9, 7)).kind == nil)
+        // The fertile window still comes from the next start.
+        #expect(e.info(on: CalDate(2026, 9, 15)).kind == .fertile(ovulation: true))
+    }
+
+    /// An open period runs its usual length, and on through today until it's
+    /// ended; past the usual length the day asks whether it ended. It doesn't
+    /// count toward the average.
+    @Test func anOpenPeriodRunsUntilEndedAndAsks() {
+        let days = [mark(9, 1, starts: true), mark(9, 4, ends: true), mark(9, 29, starts: true)]
+        let e = CalCycleEstimator(days: days, settings: nil)
+        #expect(e.periodLength == 4) // only the ended one
+        let today = CalDate(2026, 10, 5)
+        let usual = e.info(on: CalDate(2026, 10, 2), today: today)
+        #expect(usual.kind == .inPeriod && !usual.askIfEnded && usual.openPeriod?.start == CalDate(2026, 9, 29))
+        let past = e.info(on: CalDate(2026, 10, 4), today: today)
+        #expect(past.kind == .inPeriod && past.askIfEnded)
+        #expect(e.info(on: CalDate(2026, 10, 6), today: today).kind != .inPeriod)
+        // Never more than 12 days open.
+        #expect(e.info(on: CalDate(2026, 10, 11), today: CalDate(2026, 10, 30)).kind != .inPeriod)
+    }
+
+    /// Strays: an end with no start before it, a second start inside a
+    /// period, and spotting in it, change nothing.
+    @Test func strayMarksAreIgnored() {
+        let e = CalCycleEstimator(days: [mark(8, 20, ends: true), mark(9, 1, starts: true), mark(9, 3, starts: true),
+                                         mark(9, 4, flow: .spotting), mark(9, 5, ends: true)], settings: nil)
+        #expect(e.periods == [CalPeriod(start: CalDate(2026, 9, 1), end: CalDate(2026, 9, 5), marked: true)])
+        #expect(e.periodLength == 5)
+    }
+
+    /// Days logged before marks existed still make periods from their runs,
+    /// beside marked ones.
+    @Test func unmarkedRunsStillCount() {
+        let e = CalCycleEstimator(days: period(9, 1, days: 4) + [mark(9, 29, starts: true), mark(10, 3, ends: true)], settings: nil)
+        #expect(e.starts == [CalDate(2026, 9, 1), CalDate(2026, 9, 29)])
+        #expect(e.periodLength == 5) // (4 + 5) / 2, rounded
+    }
 }

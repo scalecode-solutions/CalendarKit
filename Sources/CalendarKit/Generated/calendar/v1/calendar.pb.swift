@@ -1575,12 +1575,23 @@ public nonisolated struct Calendar_V1_CycleDay: Sendable {
   /// Clears the value of `date`. Subsequent reads from it will return its default value.
   public mutating func clearDate() {self._date = nil}
 
-  /// spotting | light | medium | heavy (spotting doesn't start a cycle)
+  /// spotting | light | medium | heavy (spotting doesn't start a cycle), or ""
+  /// when not given: a period marked started or ended without a flow
+  /// (MVCALE-52). Old phones read "" as medium.
   public var flow: String = String()
 
   public var rev: Int64 = 0
 
   public var deleted: Bool = false
+
+  /// A period's first and last days, marked (MVCALE-52): the days from a
+  /// start up to its end are the period, logged or not. One day can be both
+  /// (a one-day period). The phone works periods out from them (and from runs
+  /// of logged days, for days logged before these); the server keeps them,
+  /// sealed with the date and the flow.
+  public var ends: Bool = false
+
+  public var starts: Bool = false
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1632,7 +1643,14 @@ public nonisolated struct Calendar_V1_SaveCycleDayRequest: Sendable {
   /// Clears the value of `date`. Subsequent reads from it will return its default value.
   public mutating func clearDate() {self._date = nil}
 
+  /// a flow, or "" (not given)
   public var flow: String = String()
+
+  /// the period's last day (MVCALE-52)
+  public var ends: Bool = false
+
+  /// the period's first day (MVCALE-52)
+  public var starts: Bool = false
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -4163,7 +4181,7 @@ nonisolated extension Calendar_V1_SaveIntimatePartnerResponse: SwiftProtobuf.Mes
 
 nonisolated extension Calendar_V1_CycleDay: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CycleDay"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}calendar_id\0\u{3}person_id\0\u{1}date\0\u{1}flow\0\u{1}rev\0\u{1}deleted\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}calendar_id\0\u{3}person_id\0\u{1}date\0\u{1}flow\0\u{1}rev\0\u{1}deleted\0\u{1}ends\0\u{1}starts\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -4178,6 +4196,8 @@ nonisolated extension Calendar_V1_CycleDay: SwiftProtobuf.Message, SwiftProtobuf
       case 5: try { try decoder.decodeSingularStringField(value: &self.flow) }()
       case 6: try { try decoder.decodeSingularInt64Field(value: &self.rev) }()
       case 7: try { try decoder.decodeSingularBoolField(value: &self.deleted) }()
+      case 8: try { try decoder.decodeSingularBoolField(value: &self.ends) }()
+      case 9: try { try decoder.decodeSingularBoolField(value: &self.starts) }()
       default: break
       }
     }
@@ -4209,6 +4229,12 @@ nonisolated extension Calendar_V1_CycleDay: SwiftProtobuf.Message, SwiftProtobuf
     if self.deleted != false {
       try visitor.visitSingularBoolField(value: self.deleted, fieldNumber: 7)
     }
+    if self.ends != false {
+      try visitor.visitSingularBoolField(value: self.ends, fieldNumber: 8)
+    }
+    if self.starts != false {
+      try visitor.visitSingularBoolField(value: self.starts, fieldNumber: 9)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -4220,6 +4246,8 @@ nonisolated extension Calendar_V1_CycleDay: SwiftProtobuf.Message, SwiftProtobuf
     if lhs.flow != rhs.flow {return false}
     if lhs.rev != rhs.rev {return false}
     if lhs.deleted != rhs.deleted {return false}
+    if lhs.ends != rhs.ends {return false}
+    if lhs.starts != rhs.starts {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -4277,7 +4305,7 @@ nonisolated extension Calendar_V1_CycleSettings: SwiftProtobuf.Message, SwiftPro
 
 nonisolated extension Calendar_V1_SaveCycleDayRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SaveCycleDayRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}calendar_id\0\u{3}person_id\0\u{1}date\0\u{1}flow\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}calendar_id\0\u{3}person_id\0\u{1}date\0\u{1}flow\0\u{1}ends\0\u{1}starts\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -4290,6 +4318,8 @@ nonisolated extension Calendar_V1_SaveCycleDayRequest: SwiftProtobuf.Message, Sw
       case 3: try { try decoder.decodeSingularStringField(value: &self.personID) }()
       case 4: try { try decoder.decodeSingularMessageField(value: &self._date) }()
       case 5: try { try decoder.decodeSingularStringField(value: &self.flow) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self.ends) }()
+      case 7: try { try decoder.decodeSingularBoolField(value: &self.starts) }()
       default: break
       }
     }
@@ -4315,6 +4345,12 @@ nonisolated extension Calendar_V1_SaveCycleDayRequest: SwiftProtobuf.Message, Sw
     if !self.flow.isEmpty {
       try visitor.visitSingularStringField(value: self.flow, fieldNumber: 5)
     }
+    if self.ends != false {
+      try visitor.visitSingularBoolField(value: self.ends, fieldNumber: 6)
+    }
+    if self.starts != false {
+      try visitor.visitSingularBoolField(value: self.starts, fieldNumber: 7)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -4324,6 +4360,8 @@ nonisolated extension Calendar_V1_SaveCycleDayRequest: SwiftProtobuf.Message, Sw
     if lhs.personID != rhs.personID {return false}
     if lhs._date != rhs._date {return false}
     if lhs.flow != rhs.flow {return false}
+    if lhs.ends != rhs.ends {return false}
+    if lhs.starts != rhs.starts {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

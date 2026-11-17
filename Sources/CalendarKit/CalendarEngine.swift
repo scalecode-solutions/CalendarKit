@@ -1089,11 +1089,37 @@ public final class CalendarEngine {
     /// Log (or change) a day of someone's cycle on a pair: either member may
     /// log for whoever tracks theirs there (the server refuses anyone else).
     public func logCycleDay(in calendar: CalCalendar, for person: UUID, on day: CalDate, flow: CalFlow) {
+        changeCycleDay(in: calendar, for: person, on: day) { $0.flow = flow }
+    }
+
+    /// Mark a period as starting on a day (MVCALE-52): two taps a period, the
+    /// daily flow optional.
+    public func markPeriodStart(in calendar: CalCalendar, for person: UUID, on day: CalDate, _ on: Bool = true) {
+        changeCycleDay(in: calendar, for: person, on: day) { $0.starts = on }
+    }
+
+    /// Mark a period as ending on a day (its last day).
+    public func markPeriodEnd(in calendar: CalCalendar, for person: UUID, on day: CalDate, _ on: Bool = true) {
+        changeCycleDay(in: calendar, for: person, on: day) { $0.ends = on }
+    }
+
+    /// Take a day's flow back, keeping its marks (or the whole day, with none).
+    public func clearCycleFlow(in calendar: CalCalendar, for person: UUID, on day: CalDate) {
+        changeCycleDay(in: calendar, for: person, on: day) { $0.flow = nil }
+    }
+
+    /// One row per person per day (Leaf's dedupe): change the day in place,
+    /// and a day left with nothing on it is deleted, not saved empty.
+    private func changeCycleDay(in calendar: CalCalendar, for person: UUID, on day: CalDate, _ change: (inout CalCycleDay) -> Void) {
         openStore() // a write before the first refresh must not be lost
         guard let store, calendar.tracksCycle(person, me: config.currentUserID) else { return }
         let existing = store.cycleDays().first { $0.calendarID == calendar.id && $0.personID == person && $0.date == day && !$0.deleted }
-        let d = CalCycleDay(id: existing?.id ?? UUID(), calendarID: calendar.id, personID: person, date: day, flow: flow,
-                            rev: existing?.rev ?? 0)
+        var d = existing ?? CalCycleDay(calendarID: calendar.id, personID: person, date: day, flow: nil)
+        change(&d)
+        if d.isEmpty {
+            if let existing { removeCycleDay(existing) }
+            return
+        }
         store.putCycleDay(d)
         commit(.saveCycleDay(d))
     }

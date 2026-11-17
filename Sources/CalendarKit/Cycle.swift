@@ -12,27 +12,63 @@ public enum CalFlow: String, CaseIterable, Sendable, Codable {
     public var startsAPeriod: Bool { self != .spotting }
 }
 
-/// One logged day of one person's cycle, on a pair calendar.
+/// One logged day of one person's cycle, on a pair calendar: its flow, and
+/// whether a period was marked as starting or ending on it (MVCALE-52: two
+/// taps a period, daily flow optional). One row per person per day.
 public struct CalCycleDay: Identifiable, Equatable, Sendable, Codable {
     public let id: UUID
     public let calendarID: UUID
     /// Whose cycle: one of the pair's two members.
     public let personID: UUID
     public var date: CalDate
-    public var flow: CalFlow
+    /// nil: not given (a day marked only as a start or an end).
+    public var flow: CalFlow?
+    /// A period was marked as starting here.
+    public var starts: Bool
+    /// A period was marked as ending here (its last day).
+    public var ends: Bool
     public var rev: Int64
     public var deleted: Bool
 
-    public init(id: UUID = UUID(), calendarID: UUID, personID: UUID, date: CalDate, flow: CalFlow,
-                rev: Int64 = 0, deleted: Bool = false) {
+    public init(id: UUID = UUID(), calendarID: UUID, personID: UUID, date: CalDate, flow: CalFlow?,
+                starts: Bool = false, ends: Bool = false, rev: Int64 = 0, deleted: Bool = false) {
         self.id = id
         self.calendarID = calendarID
         self.personID = personID
         self.date = date
         self.flow = flow
+        self.starts = starts
+        self.ends = ends
         self.rev = rev
         self.deleted = deleted
     }
+
+    /// Nothing on it: no flow, no mark (deleted rather than saved).
+    public var isEmpty: Bool { flow == nil && !starts && !ends }
+
+    private enum CodingKeys: String, CodingKey { case id, calendarID, personID, date, flow, starts, ends, rev, deleted }
+
+    /// Days stored before marks existed read as unmarked.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        calendarID = try c.decode(UUID.self, forKey: .calendarID)
+        personID = try c.decode(UUID.self, forKey: .personID)
+        date = try c.decode(CalDate.self, forKey: .date)
+        flow = try c.decodeIfPresent(CalFlow.self, forKey: .flow)
+        starts = try c.decodeIfPresent(Bool.self, forKey: .starts) ?? false
+        ends = try c.decodeIfPresent(Bool.self, forKey: .ends) ?? false
+        rev = try c.decode(Int64.self, forKey: .rev)
+        deleted = try c.decode(Bool.self, forKey: .deleted)
+    }
+}
+
+/// One period: its first day, and its last when known (nil: still open).
+public struct CalPeriod: Equatable, Sendable {
+    public let start: CalDate
+    public let end: CalDate?
+    /// From the marks (MVCALE-52), not inferred from a run of logged days.
+    public let marked: Bool
 }
 
 /// A person's cycle settings (0 = measure from what's logged).
@@ -70,6 +106,8 @@ public struct CalCycleDayInfo: Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
         /// Logged bleeding (or spotting) on this day.
         case logged(CalFlow)
+        /// A day inside a marked period with no flow logged on it (MVCALE-52).
+        case inPeriod
         /// An estimated period day (not logged).
         case predictedPeriod
         /// The estimated fertile window (ovulation's day included).
@@ -78,6 +116,17 @@ public struct CalCycleDayInfo: Equatable, Sendable {
     public let kind: Kind?
     /// 1-based day of the cycle, when there's a cycle start before it.
     public let cycleDay: Int?
+    /// The day is past an open period's usual length: ask whether it ended.
+    public var askIfEnded = false
+    /// The open period this day belongs to, if any (offers "Ended today").
+    public var openPeriod: CalPeriod?
+
+    public init(kind: Kind?, cycleDay: Int?, askIfEnded: Bool = false, openPeriod: CalPeriod? = nil) {
+        self.kind = kind
+        self.cycleDay = cycleDay
+        self.askIfEnded = askIfEnded
+        self.openPeriod = openPeriod
+    }
 }
 
 /// Estimates from logged days, the calendar method (ACOG): a period starts
@@ -94,21 +143,43 @@ public struct CalCycleEstimator: Sendable {
         self.settings = settings
     }
 
-    /// The first day of each logged period. Spotting never starts one; a
-    /// bleeding day within 3 days of the last bleeding day continues it; and
-    /// bleeding less than 15 days after a start is mid-cycle, not a new
-    /// period (it would drag the average cycle down; Leaf's question).
-    public var starts: [CalDate] {
-        var out: [CalDate] = []
-        var last: CalDate?
-        for d in days where d.flow.startsAPeriod {
-            defer { last = d.date }
-            if let l = last, l.days(to: d.date) <= 3 { continue }
-            if let s = out.last, s.days(to: d.date) < 15 { continue }
-            out.append(d.date)
+    /// Each period, oldest first (MVCALE-52). A marked start opens one; it
+    /// runs to the first marked end on or after it, within 15 days, else it's
+    /// still open. A start inside a period continues it, and an end with no
+    /// start before it is ignored. Days logged without marks (before marks
+    /// existed, or flow alone) still make periods from their runs: spotting
+    /// never starts one, a bleeding day within 3 days of the last continues
+    /// it. Across both, a start less than 15 days after the previous one is
+    /// mid-cycle bleeding, not a new period.
+    public var periods: [CalPeriod] {
+        let ends = days.filter(\.ends).map(\.date)
+        var marked: [CalPeriod] = []
+        for d in days where d.starts {
+            if let p = marked.last, p.covers(d.date) || p.start.days(to: d.date) < 15 { continue }
+            let end = ends.first { $0 >= d.date && d.date.days(to: $0) < 15 }
+            marked.append(CalPeriod(start: d.date, end: end, marked: true))
+        }
+        // Runs of unmarked bleeding days outside the marked periods.
+        var runs: [CalPeriod] = []
+        var runStart: CalDate?, last: CalDate?
+        for d in days where !d.starts && !d.ends && (d.flow?.startsAPeriod ?? false)
+            && !marked.contains(where: { $0.covers(d.date) }) {
+            if let l = last, l.days(to: d.date) <= 3 { last = d.date; continue }
+            if let s0 = runStart, let l = last { runs.append(CalPeriod(start: s0, end: l, marked: false)) }
+            runStart = d.date
+            last = d.date
+        }
+        if let s0 = runStart, let l = last { runs.append(CalPeriod(start: s0, end: l, marked: false)) }
+        var out: [CalPeriod] = []
+        for p in (marked + runs).sorted(by: { $0.start < $1.start }) {
+            if let prev = out.last, prev.start.days(to: p.start) < 15 { continue }
+            out.append(p)
         }
         return out
     }
+
+    /// The first day of each period.
+    public var starts: [CalDate] { periods.map(\.start) }
 
     /// The average of the last up to six cycles, else the setting, else 28.
     public var cycleLength: Int {
@@ -121,20 +192,11 @@ public struct CalCycleEstimator: Sendable {
         return 28
     }
 
-    /// The average logged period length (last up to six), else the setting, else 5.
+    /// The average length of the last up to six finished periods (a marked
+    /// start to its marked end, or a run's first to last bleeding day), else
+    /// the setting, else 5. An open period doesn't count until it ends.
     public var periodLength: Int {
-        let s = starts
-        var lengths: [Int] = []
-        // A period ends at the last bleeding day of its own run (gaps of at
-        // most 3 days); a bleed later in the cycle isn't part of it.
-        let bleeding = days.filter(\.flow.startsAPeriod).map(\.date)
-        for start in s {
-            var last = start
-            for d in bleeding where d > last {
-                if last.days(to: d) <= 3 { last = d } else if d > start { break }
-            }
-            lengths.append(start.days(to: last) + 1)
-        }
+        let lengths = periods.compactMap { p in p.end.map { p.start.days(to: $0) + 1 } }
         let recent = lengths.suffix(6).filter { (1...12).contains($0) }
         if !recent.isEmpty { return Int((Double(recent.reduce(0, +)) / Double(recent.count)).rounded()) }
         if let p = settings?.periodLength, p > 0 { return p }
@@ -147,10 +209,23 @@ public struct CalCycleEstimator: Sendable {
         return (1...max(1, count)).map { last.adding(days: cycleLength * $0) }
     }
 
-    /// What one day is.
-    public func info(on day: CalDate) -> CalCycleDayInfo {
-        if let logged = days.last(where: { $0.date == day }) {
-            return CalCycleDayInfo(kind: .logged(logged.flow), cycleDay: cycleDay(on: day))
+    /// What one day is. `today` bounds an open period: it runs at least its
+    /// usual length, and on through today (up to 12 days) until it's ended.
+    public func info(on day: CalDate, today: CalDate? = nil) -> CalCycleDayInfo {
+        let open = periods.last.flatMap { $0.end == nil ? $0 : nil }
+        let inOpen: Bool = {
+            guard let open, open.start <= day else { return false }
+            let usual = open.start.adding(days: periodLength - 1)
+            let through = max(usual, min(today ?? usual, open.start.adding(days: 11)))
+            return day <= through
+        }()
+        let ask = inOpen && day > open!.start.adding(days: periodLength - 1)
+        let openHere = inOpen ? open : nil
+        if let logged = days.last(where: { $0.date == day }), let flow = logged.flow {
+            return CalCycleDayInfo(kind: .logged(flow), cycleDay: cycleDay(on: day), askIfEnded: ask, openPeriod: openHere)
+        }
+        if inOpen || periods.contains(where: { $0.end != nil && $0.covers(day) }) {
+            return CalCycleDayInfo(kind: .inPeriod, cycleDay: cycleDay(on: day), askIfEnded: ask, openPeriod: openHere)
         }
         let all = starts + predictedStarts()
         // Predicted period days: from each predicted start, for the period's length.
@@ -174,5 +249,14 @@ public struct CalCycleEstimator: Sendable {
         let all = (starts + predictedStarts()).filter { $0 <= day }
         guard let s = all.last else { return nil }
         return s.days(to: day) + 1
+    }
+}
+
+extension CalPeriod {
+    /// Whether a day falls inside it (an open one: within 15 days of its start).
+    func covers(_ day: CalDate) -> Bool {
+        guard start <= day else { return false }
+        if let end { return day <= end }
+        return start.days(to: day) < 15
     }
 }

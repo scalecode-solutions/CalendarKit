@@ -276,7 +276,9 @@ public struct ConnectCalendarTransport: CalendarTransport {
         req.calendarID = Wire.id(d.calendarID)
         req.personID = Wire.id(d.personID)
         req.date = Wire.day(d.date)
-        req.flow = d.flow.rawValue
+        req.flow = d.flow?.rawValue ?? ""
+        req.starts = d.starts
+        req.ends = d.ends
         return try Wire.cycleDay(value(await client.saveCycleDay(request: req, headers: try await headers())).day)
     }
 
@@ -466,7 +468,8 @@ enum Wire {
 
     static func cycleDay(_ w: Calendar_V1_CycleDay) throws -> CalCycleDay {
         CalCycleDay(id: try uuid(w.id), calendarID: try uuid(w.calendarID), personID: try uuid(w.personID),
-                    date: day(w.date), flow: CalFlow(rawValue: w.flow) ?? .medium, rev: w.rev, deleted: w.deleted)
+                    date: day(w.date), flow: w.flow.isEmpty ? nil : CalFlow(rawValue: w.flow) ?? .medium,
+                    starts: w.starts, ends: w.ends, rev: w.rev, deleted: w.deleted)
     }
 
     static func cycleSettings(_ w: Calendar_V1_CycleSettings) throws -> CalCycleSettings {
