@@ -28,7 +28,7 @@ public struct CalendarSettingsView<Extra: View>: View {
                     ForEach(CalendarOpensOn.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
             } footer: {
-                Text("Your color marks what you add. Last used opens Month or Agenda, whichever you were on.")
+                Text("Your color marks what you add.")
             }
             Section {
                 if engine.calendars.isEmpty {
@@ -70,7 +70,7 @@ public struct CalendarSettingsView<Extra: View>: View {
                 } else if let e = engine.lastError {
                     Text(e)
                 } else {
-                    Text("Each is yours and one friend's, and either of you can change anything on it. Hiding one is only on your screens. Its labels, history and privacy are with your conversation.")
+                    Text("One calendar with each friend. Hiding one only hides it for you.")
                 }
             }
             extra
@@ -153,7 +153,7 @@ struct LabelsView: View {
                     .swipeActions { if pair?.frozen == false { Button("Delete", role: .destructive) { engine.deleteLabel(l) } } }
                 }
             } footer: {
-                Text("Labels belong to this calendar: you both see and use them. Deleting one keeps its events.")
+                Text("Shared by you both. Deleting one keeps its events.")
             }
             if let pair, !pair.frozen {
                 Section("New label") {

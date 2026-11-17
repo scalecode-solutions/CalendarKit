@@ -2,8 +2,8 @@ import Foundation
 
 // Cycle tracking (0.8.0 design sprint, MVCALE-28; PROVISIONAL). Days the
 // person logs, and estimates made on the phone from them. Estimates, not
-// advice: "Estimates from your entries. Not a medical device and not a
-// contraceptive method." (plan decision 12).
+// advice: "Estimates only. Not a medical device or birth control." (plan
+// decision 12, shortened in the design review of 2026-11-16).
 
 /// How a logged day flows. Spotting is its own mark and never starts a cycle
 /// (plan decision 13).
