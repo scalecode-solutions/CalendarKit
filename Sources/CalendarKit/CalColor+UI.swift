@@ -121,16 +121,25 @@ public struct CalendarAppearance: Sendable {
     public static let standard = CalendarAppearance()
 }
 
-/// A person's round avatar: their thumbnail, else initials on their color.
+/// A person's round avatar: the host's photo when it draws one, else their
+/// thumbnail from the directory, else initials on their color.
 struct CalAvatar: View {
     let contact: CalContact?
     let fallbackName: String
     let tint: CalColor
     var size: CGFloat = 22
+    /// Who it is, when `contact` is nil (someone the directory doesn't know):
+    /// the host may still know them.
+    var personID: UUID? = nil
+    @Environment(\.calendarHostPeople) private var host
+
+    private var id: UUID? { personID ?? contact?.id }
 
     var body: some View {
         Group {
-            if let data = contact?.avatar, let img = UIImage(data: data) {
+            if let id, let hosted = host.avatar(id, size) {
+                hosted.scaledToFill()
+            } else if let data = contact?.avatar, let img = UIImage(data: data) {
                 Image(uiImage: img).resizable().scaledToFill()
             } else {
                 Text(initials)
@@ -147,7 +156,7 @@ struct CalAvatar: View {
 
     private var initials: String {
         if contact == nil && fallbackName == "My calendar" { return "Me" }
-        let words = (contact?.name ?? fallbackName).split(separator: " ")
+        let words = (id.flatMap { host.hostName($0) } ?? contact?.name ?? fallbackName).split(separator: " ")
         return String(words.prefix(2).compactMap(\.first)).uppercased()
     }
 }

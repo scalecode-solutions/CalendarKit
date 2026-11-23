@@ -7,6 +7,7 @@ import os
 /// each pair (shown or hidden, its color, and from its row its labels and
 /// history). The host appends its own sections through `extra`.
 public struct CalendarSettingsView<Extra: View>: View {
+    @Environment(\.calendarHostPeople) private var host
     @Bindable var engine: CalendarEngine
     let extra: Extra
     @AppStorage(CalendarOpensOn.storageKey) private var opensOn: CalendarOpensOn = .lastUsed
@@ -34,14 +35,20 @@ public struct CalendarSettingsView<Extra: View>: View {
                 if engine.calendars.isEmpty {
                     Text("Your calendars with friends show up here.").foregroundStyle(.secondary)
                 }
-                ForEach(engine.calendars) { c in
+                // Listed by the names on screen (the host's), though the
+                // engine keeps its own order for the saved auto colours.
+                ForEach(engine.calendars.sorted {
+                    (engine.displayName($0, host: host).lowercased(), $0.id.uuidString)
+                        < (engine.displayName($1, host: host).lowercased(), $1.id.uuidString)
+                }) { c in
                     HStack(spacing: 10) {
                         // A pair's own settings (labels, activity, privacy) live
                         // with the conversation in the host: PairSettingsView.
                         HStack(spacing: 10) {
-                            CalAvatar(contact: engine.person(of: c), fallbackName: engine.displayName(c), tint: c.displayColor, size: 28)
+                            CalAvatar(contact: engine.person(of: c), fallbackName: engine.displayName(c, host: host), tint: c.displayColor, size: 28,
+                                      personID: c.otherID)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(engine.displayName(c))
+                                Text(engine.displayName(c, host: host))
                                 Text(stateText(c)).font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 0)
@@ -56,8 +63,8 @@ public struct CalendarSettingsView<Extra: View>: View {
                         } label: {
                             Circle().fill(CalTint(c.displayColor)).frame(width: 18, height: 18)
                         }
-                        .accessibilityLabel("Color for \(engine.displayName(c))")
-                        Toggle("Show \(engine.displayName(c))", isOn: Binding(get: { c.visible }, set: { engine.setVisible(c, $0) }))
+                        .accessibilityLabel("Color for \(engine.displayName(c, host: host))")
+                        Toggle("Show \(engine.displayName(c, host: host))", isOn: Binding(get: { c.visible }, set: { engine.setVisible(c, $0) }))
                             .labelsHidden()
                     }
                 }
@@ -94,6 +101,7 @@ public struct CalendarSettingsView<Extra: View>: View {
 /// it opens, which pairs show). The host keeps the engine running while it's
 /// on screen, as for the calendar.
 public struct PairSettingsView: View {
+    @Environment(\.calendarHostPeople) private var host
     let engine: CalendarEngine
     let otherID: UUID
 
@@ -117,7 +125,7 @@ public struct PairSettingsView: View {
                             .accessibilityIdentifier("pair.privacy")
                     } footer: {
                         Text(c.frozen ? "You two aren't friends any more, so this calendar is read-only."
-                                      : "These belong to your calendar with \(engine.displayName(c)): you both see and change them.")
+                                      : "These belong to your calendar with \(engine.displayName(c, host: host)): you both see and change them.")
                     }
                 }
                 .calendarBackdrop(engine)
@@ -174,6 +182,7 @@ struct LabelsView: View {
 }
 
 struct ActivityView: View {
+    @Environment(\.calendarHostPeople) private var host
     let engine: CalendarEngine
     let pair: CalCalendar
     @State private var rows: [CalActivity] = []
@@ -199,7 +208,7 @@ struct ActivityView: View {
 
     private func who(_ id: UUID?) -> String {
         if id == engine.config.currentUserID { return "You" }
-        return id.flatMap { engine.people[$0]?.name }.flatMap { $0.isEmpty ? nil : $0 } ?? "Someone"
+        return id.flatMap { engine.personName($0, host: host) } ?? "Someone"
     }
 
     private func sentence(_ a: CalActivity) -> String {

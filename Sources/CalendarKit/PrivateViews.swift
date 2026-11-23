@@ -265,6 +265,7 @@ struct HeartMark: View {
 
 /// What + offers, when a pair on screen has intimate entries or cycle on.
 struct AddMenu: View {
+    @Environment(\.calendarHostPeople) private var host
     let engine: CalendarEngine
     let appearance: CalendarAppearance
     /// The pairs + may add private things to (writable, consented, in scope).
@@ -290,7 +291,7 @@ struct AddMenu: View {
                     Button { engine.quickLog(in: intimate[0]) } label: { Label("Quick log", systemImage: "bolt.heart") }
                 } else {
                     Menu {
-                        ForEach(intimate) { c in Button(engine.displayName(c)) { engine.quickLog(in: c) } }
+                        ForEach(intimate) { c in Button(engine.displayName(c, host: host)) { engine.quickLog(in: c) } }
                     } label: { Label("Quick log", systemImage: "bolt.heart") }
                 }
             }
@@ -301,7 +302,7 @@ struct AddMenu: View {
                     if cycle.count == 1 {
                         periodPeople(cycle[0], periodDay)
                     } else {
-                        ForEach(cycle) { c in Menu(engine.displayName(c)) { periodPeople(c, periodDay) } }
+                        ForEach(cycle) { c in Menu(engine.displayName(c, host: host)) { periodPeople(c, periodDay) } }
                     }
                 } label: { Label("Log period", systemImage: "drop") }
                 .accessibilityIdentifier("logPeriodMenu")
@@ -314,7 +315,7 @@ struct AddMenu: View {
     @ViewBuilder private func periodPeople(_ pair: CalCalendar, _ day: CalDate) -> some View {
         // Only whoever tracks their cycle here (MVCALE-51).
         ForEach(engine.cyclePeople(in: pair), id: \.self) { person in
-            Menu(person == me ? "You" : engine.displayName(pair)) {
+            Menu(person == me ? "You" : engine.displayName(pair, host: host)) {
                 CycleFlowButtons(engine: engine, pair: pair, person: person, day: day)
             }
         }
@@ -412,6 +413,7 @@ struct PrivateDaySections: View {
 /// who, then a few details. VoiceOver says only "Private entry" and the time
 /// (plan decision 21); the details are one tap away.
 struct PrivateEntryRow: View {
+    @Environment(\.calendarHostPeople) private var host
     let engine: CalendarEngine
     let entry: CalPrivateEntry
     let zone: TimeZone
@@ -476,7 +478,7 @@ struct PrivateEntryRow: View {
     }
 
     private var addedBy: String {
-        engine.calendar(entry.calendarID).map { engine.displayName($0) } ?? "them"
+        engine.calendar(entry.calendarID).map { engine.displayName($0, host: host) } ?? "them"
     }
 }
 
@@ -484,6 +486,7 @@ struct PrivateEntryRow: View {
 /// logged day (with its flow, changed in place), or else one plain line for
 /// an estimate ("Period expected"). Logging a new day is + → Log period.
 struct CycleDaySection: View {
+    @Environment(\.calendarHostPeople) private var host
     let engine: CalendarEngine
     let pair: CalCalendar
     let day: CalDate
@@ -594,7 +597,7 @@ struct CycleDaySection: View {
     }
 
     private func name(_ person: UUID) -> String {
-        person == me ? "You" : engine.displayName(pair)
+        person == me ? "You" : engine.displayName(pair, host: host)
     }
 }
 

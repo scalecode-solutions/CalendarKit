@@ -19,6 +19,7 @@ struct LabShell<Account: View>: View {
     let session: LabSession
     @ViewBuilder let account: () -> Account
     @State private var tab: LabTab = LabStart.fromEnvironment == .calendar ? .home : .chats
+    @State private var hostPeople = LabHostPeople()
 
     var body: some View {
         TabView(selection: $tab) {
@@ -30,11 +31,22 @@ struct LabShell<Account: View>: View {
             }
             Tab("Settings", systemImage: "gearshape", value: LabTab.settings) {
                 NavigationStack {
-                    CalendarSettingsView(engine: session.engine) { account() }
+                    CalendarSettingsView(engine: session.engine) {
+                        account()
+                        if LabHostPeople.on {
+                            Section("Host people") {
+                                Toggle("Host people", isOn: Binding(get: { hostPeople.enabled }, set: { hostPeople.enabled = $0 }))
+                                    .accessibilityIdentifier("lab.host.toggle")
+                                Button("Rename friend") { hostPeople.renames += 1 }
+                                    .accessibilityIdentifier("lab.host.rename")
+                            }
+                        }
+                    }
                         .navigationTitle("Settings")
                 }
             }
         }
+        .calendarHostPeople(hostPeople.people)
         // For the UI tests: whether the engine is running right now. Invisible,
         // and not hit-testable; VoiceOver users never land on it.
         .overlay(alignment: .topLeading) {
@@ -299,5 +311,46 @@ struct LabCalendarScreen: View {
                 }
             }
             .onAppear { hold.arm(session) }
+    }
+}
+
+/// The Lab as a host that knows its own names and photos (LAB_HOST_PEOPLE=1):
+/// it calls LAB_FRIEND "Lab Host Friend" and draws a photo for them, through
+/// `calendarHostPeople`. Observable, so a rename or turning it off in Settings
+/// redraws the kit's open screens. Unset, the Lab is a host with no people.
+@MainActor @Observable
+final class LabHostPeople {
+    static var on: Bool { ProcessInfo.processInfo.environment["LAB_HOST_PEOPLE"] == "1" }
+    static var friend: UUID? { ProcessInfo.processInfo.environment["LAB_FRIEND"].flatMap(UUID.init(uuidString:)) }
+
+    var enabled = true
+    var renames = 0
+
+    var people: CalendarHostPeople {
+        guard Self.on, let friend = Self.friend else { return .none }
+        return CalendarHostPeople(
+            name: { [self] id in
+                guard enabled, id == friend else { return nil }
+                return renames == 0 ? "Lab Host Friend" : "Lab Host Friend \(renames + 1)"
+            },
+            avatar: { [self] id, size in
+                guard enabled, id == friend else { return nil }
+                return AnyView(LabHostPhoto(size: size))
+            })
+    }
+}
+
+/// The Lab's stand-in for a host's photo: unmistakable, and findable by tests.
+private struct LabHostPhoto: View {
+    let size: CGFloat
+    var body: some View {
+        ZStack {
+            Color.purple
+            Image(systemName: "star.fill").font(.system(size: size * 0.45)).foregroundStyle(.white)
+        }
+        .frame(width: size, height: size)
+        .accessibilityElement()
+        .accessibilityLabel("Host photo")
+        .accessibilityIdentifier("lab.host.avatar")
     }
 }

@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Create or edit an event, one occurrence, or this-and-following.
 struct EventEditorView: View {
+    @Environment(\.calendarHostPeople) private var host
     let engine: CalendarEngine
     let request: EditorRequest
 
@@ -85,12 +86,12 @@ struct EventEditorView: View {
                 if isNew {
                     Picker("Calendar", selection: $draft.calendarID) {
                         ForEach(engine.writableCalendars) { c in
-                            Text(engine.displayName(c)).tag(Optional(c.id))
+                            Text(engine.displayName(c, host: host)).tag(Optional(c.id))
                         }
                     }
                     .onChange(of: draft.calendarID) { draft.labelID = nil }
                 } else if let calendar {
-                    LabeledContent("Calendar", value: engine.displayName(calendar))
+                    LabeledContent("Calendar", value: engine.displayName(calendar, host: host))
                 }
                 if let cal = draft.calendarID, !engine.labels(of: cal).isEmpty {
                     Picker("Label", selection: $draft.labelID) {
@@ -103,7 +104,7 @@ struct EventEditorView: View {
                 // Who will see it matters when choosing where it goes; once
                 // it's there, saying so on every edit is noise (Frond's audit).
                 if isNew, let calendar {
-                    Text("You and \(engine.displayName(calendar)) both see and can change it.")
+                    Text("You and \(engine.displayName(calendar, host: host)) both see and can change it.")
                 }
             }
             Section("Notes") {

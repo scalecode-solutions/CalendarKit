@@ -3,6 +3,7 @@ import SwiftUI
 /// One event (or occurrence): when, repeats, whose, label, where, notes;
 /// edit and delete for people who may write.
 struct EventDetailView: View {
+    @Environment(\.calendarHostPeople) private var host
     let engine: CalendarEngine
     let occurrence: CalOccurrence
     let edit: (EditorRequest) -> Void
@@ -20,11 +21,11 @@ struct EventDetailView: View {
     /// Who put it there, when that isn't the person reading: the other one in
     /// the pair ("Someone" once they're not a friend). Exactly when a row
     /// shows the author's avatar. For an occurrence it's the series' maker.
-    private var addedBy: (name: String, contact: CalContact?)? {
+    private var addedBy: (name: String, contact: CalContact?, id: UUID)? {
         let a = occurrence.author
         if a == me { return nil }
         let p = engine.people[a]
-        return (p.map(\.name).flatMap { $0.isEmpty ? nil : $0 } ?? "Someone", p)
+        return (engine.personName(a, host: host) ?? "Someone", p, a)
     }
     /// Who changed it last, when that's the other person and they didn't add it.
     private var changedBy: CalContact? {
@@ -42,9 +43,9 @@ struct EventDetailView: View {
             Section {
                 DetailRow(icon: "calendar") {
                     HStack(spacing: 8) {
-                        CalAvatar(contact: engine.person(of: occurrence.calendar), fallbackName: engine.displayName(occurrence.calendar),
-                                  tint: occurrence.calendar.displayColor, size: 22)
-                        Text(engine.displayName(occurrence.calendar))
+                        CalAvatar(contact: engine.person(of: occurrence.calendar), fallbackName: engine.displayName(occurrence.calendar, host: host),
+                                  tint: occurrence.calendar.displayColor, size: 22, personID: occurrence.calendar.otherID)
+                        Text(engine.displayName(occurrence.calendar, host: host))
                     }
                 }
                 if let label = occurrence.label {
@@ -62,7 +63,7 @@ struct EventDetailView: View {
                     DetailRow(icon: "person") {
                         HStack(spacing: 8) {
                             CalAvatar(contact: who.contact, fallbackName: who.name,
-                                      tint: occurrence.calendar.displayColor, size: 22)
+                                      tint: occurrence.calendar.displayColor, size: 22, personID: who.id)
                             Text("Added by \(who.name)")
                         }
                     }

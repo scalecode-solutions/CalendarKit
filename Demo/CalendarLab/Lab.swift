@@ -22,7 +22,10 @@ enum LabServer: String, CaseIterable, Identifiable, Sendable {
     var calendarBaseURL: URL {
         switch self {
         case .production: URL(string: "https://cal.mvchat.app")!
-        case .local:      URL(string: "http://localhost:6100")!
+        // LAB_CAL_BASE points the local Lab at another mvCalendar (a throwaway
+        // one for tests); unset, the usual local port.
+        case .local:      ProcessInfo.processInfo.environment["LAB_CAL_BASE"].flatMap(URL.init(string:))
+                              ?? URL(string: "http://localhost:6100")!
         }
     }
 }

@@ -20,6 +20,12 @@ final class LabShellUITests: XCTestCase {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchEnvironment = ["CAL_DEV_TOKEN": token, "CAL_DEV_USER": user]
+        if let base = env["LAB_CAL_BASE"] { app.launchEnvironment["LAB_CAL_BASE"] = base }
+        if name.contains("HostPeople") {
+            app.launchEnvironment["LAB_HOST_PEOPLE"] = "1"
+            app.launchEnvironment["LAB_FRIEND"] = friend
+            app.launchEnvironment["LAB_START"] = "calendar"   // the engine runs (and loads friends) on the calendar
+        }
         app.launch()
     }
 
@@ -28,6 +34,34 @@ final class LabShellUITests: XCTestCase {
         a.name = name
         a.lifetime = .keepAlways
         add(a)
+    }
+
+    /// The host's people win in the kit (MVCALE-120): in Settings' calendar
+    /// list, the friend shows under the host's name with the host's photo; a
+    /// rename in the host redraws the open screen; turning the host off falls
+    /// back to the server's name and photo.
+    func testHostPeopleInTheCalendarList() {
+        assertCalendarShowing()
+        app.tabBars.buttons["Settings"].tap()
+        let hosted = app.staticTexts["Lab Host Friend"]
+        XCTAssert(hosted.waitForExistence(timeout: 15), "the friend isn't under the host's name")
+        XCTAssert(app.descendants(matching: .any)["lab.host.avatar"].exists, "no host photo")
+        shot("host-people-list")
+
+        let rename = app.buttons["lab.host.rename"]
+        for _ in 0..<6 where !rename.isHittable { app.swipeUp() }
+        rename.tap()
+        for _ in 0..<6 where !app.staticTexts["Lab Host Friend 2"].exists { app.swipeDown() }
+        XCTAssert(app.staticTexts["Lab Host Friend 2"].waitForExistence(timeout: 5), "the rename didn't reach the open screen")
+        shot("host-people-renamed")
+
+        let toggle = app.switches["lab.host.toggle"]
+        for _ in 0..<6 where !toggle.isHittable { app.swipeUp() }
+        toggle.switches.firstMatch.exists ? toggle.switches.firstMatch.tap() : toggle.tap()
+        for _ in 0..<6 where !app.staticTexts["Directory Friend"].exists { app.swipeDown() }
+        XCTAssert(app.staticTexts["Directory Friend"].waitForExistence(timeout: 5), "no fallback to the server's name")
+        XCTAssertFalse(app.descendants(matching: .any)["lab.host.avatar"].exists, "the host's photo stayed")
+        shot("host-people-off")
     }
 
     /// The calendar's own control row is on screen.

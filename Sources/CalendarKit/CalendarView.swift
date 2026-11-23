@@ -580,6 +580,7 @@ struct WeekStrip: View {
 /// full width; the location. Nothing has a line limit. VoiceOver reads it as
 /// one element, title first.
 struct AgendaRow: View {
+    @Environment(\.calendarHostPeople) private var host
     let occurrence: CalOccurrence
     let day: CalDate
     let engine: CalendarEngine
@@ -587,7 +588,7 @@ struct AgendaRow: View {
     var inPair = false
 
     var body: some View {
-        let who = showOwner ? AuthorBadge.author(of: occurrence, engine: engine, inPair: inPair) : nil
+        let who = showOwner ? AuthorBadge.author(of: occurrence, engine: engine, host: host, inPair: inPair) : nil
         let time = Self.timeLine(occurrence.when, on: day, zone: .current)
         let location = occurrence.event.fields.location
         HStack(alignment: .top, spacing: 10) {
@@ -847,12 +848,13 @@ struct AuthorBadge: View {
     let tint: CalColor
     let addedByOther: Bool
     var size: CGFloat = 22
+    var personID: UUID? = nil
 
     /// What it says to VoiceOver.
     var spokenName: String { addedByOther ? "Added by \(name)" : name }
 
     var body: some View {
-        CalAvatar(contact: contact, fallbackName: name, tint: tint, size: size)
+        CalAvatar(contact: contact, fallbackName: name, tint: tint, size: size, personID: personID)
             .accessibilityHidden(false)
             .accessibilityLabel(spokenName)
     }
@@ -860,17 +862,19 @@ struct AuthorBadge: View {
     /// Across every pair: whose pair it's on (the other person). Inside one
     /// pair: who added it (you, or them).
     @MainActor
-    static func author(of o: CalOccurrence, engine: CalendarEngine, inPair: Bool = false, size: CGFloat = 22) -> AuthorBadge? {
+    static func author(of o: CalOccurrence, engine: CalendarEngine, host: CalendarHostPeople = .none,
+                       inPair: Bool = false, size: CGFloat = 22) -> AuthorBadge? {
         let me = engine.config.currentUserID
         guard inPair else {
-            return AuthorBadge(contact: engine.person(of: o.calendar), name: engine.displayName(o.calendar),
-                               tint: o.calendar.displayColor, addedByOther: false, size: size)
+            return AuthorBadge(contact: engine.person(of: o.calendar), name: engine.displayName(o.calendar, host: host),
+                               tint: o.calendar.displayColor, addedByOther: false, size: size, personID: o.calendar.otherID)
         }
         if o.author == me {
-            return AuthorBadge(contact: engine.people[me], name: "you", tint: engine.accentColor, addedByOther: true, size: size)
+            return AuthorBadge(contact: engine.people[me], name: "you", tint: engine.accentColor, addedByOther: true, size: size,
+                               personID: me)
         }
-        return AuthorBadge(contact: engine.people[o.author], name: engine.displayName(o.calendar),
-                           tint: o.calendar.displayColor, addedByOther: true, size: size)
+        return AuthorBadge(contact: engine.people[o.author], name: engine.displayName(o.calendar, host: host),
+                           tint: o.calendar.displayColor, addedByOther: true, size: size, personID: o.author)
     }
 }
 
@@ -930,6 +934,7 @@ struct CalScope: Equatable {
 /// The focus picker the kit shows when it owns the focus: Everyone, the
 /// hidden ones in a menu, then a chip per shown pair.
 struct PeopleBar: View {
+    @Environment(\.calendarHostPeople) private var host
     let engine: CalendarEngine
     let focus: CalFocus
     let choose: (CalFocus) -> Void
@@ -947,7 +952,7 @@ struct PeopleBar: View {
                 if !hidden.isEmpty {
                     Menu {
                         ForEach(hidden) { c in
-                            Button(engine.displayName(c)) { choose(.person(c.otherID)) }
+                            Button(engine.displayName(c, host: host)) { choose(.person(c.otherID)) }
                         }
                     } label: {
                         // Selected while one of the hidden pairs is in focus.
@@ -963,7 +968,7 @@ struct PeopleBar: View {
                     .accessibilityAddTraits(hidden.contains { focus == .person($0.otherID) } ? .isSelected : [])
                 }
                 ForEach(shown) { c in
-                    FocusChip(title: firstName(c), contact: engine.person(of: c), tint: c.displayColor,
+                    FocusChip(title: firstName(c), contact: engine.person(of: c), personID: c.otherID, tint: c.displayColor,
                               selected: focus == .person(c.otherID)) { choose(.person(c.otherID)) }
                 }
             }
@@ -974,14 +979,14 @@ struct PeopleBar: View {
     }
 
     private func firstName(_ c: CalCalendar) -> String {
-        let full = engine.displayName(c)
-        return full.split(separator: " ").first.map(String.init) ?? full
+        engine.shortName(c, host: host)
     }
 }
 
 struct FocusChip: View {
     let title: String
     let contact: CalContact?
+    var personID: UUID? = nil
     let tint: CalColor
     let selected: Bool
     var systemImage: String? = nil
@@ -996,7 +1001,7 @@ struct FocusChip: View {
                         .foregroundStyle(CalOnTint(tint))
                         .background { Circle().fill(CalTint(tint)) }
                 } else {
-                    CalAvatar(contact: contact, fallbackName: title, tint: tint, size: 22)
+                    CalAvatar(contact: contact, fallbackName: title, tint: tint, size: 22, personID: personID)
                 }
                 Text(title)
                     .font(.subheadline.weight(.medium))

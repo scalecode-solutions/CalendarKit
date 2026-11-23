@@ -37,6 +37,7 @@ enum PrivateChoices {
 }
 
 struct PrivateEntryEditor: View {
+    @Environment(\.calendarHostPeople) private var host
     let engine: CalendarEngine
     let sheet: PrivateSheet
     @Environment(\.dismiss) private var dismiss
@@ -92,7 +93,7 @@ struct PrivateEntryEditor: View {
     private var pair: CalCalendar? { calendarID.flatMap { engine.calendar($0) } }
     /// Where partners come from, when there are none yet.
     private var noPartners: String {
-        let who = pair.map { engine.displayName($0) } ?? "them"
+        let who = pair.map { engine.displayName($0, host: host) } ?? "them"
         if forOther { return "\(who) hasn't added any partners yet. They add their own under Privacy." }
         return "No partners yet. Add them under Privacy in your settings with \(who)."
     }
@@ -201,14 +202,14 @@ struct PrivateEntryEditor: View {
             if let pair {
                 Picker("For", selection: forWho) {
                     Text("You").tag(engine.config.currentUserID)
-                    Text(engine.displayName(pair)).tag(pair.otherID)
+                    Text(engine.displayName(pair, host: host)).tag(pair.otherID)
                 }
                 .accessibilityIdentifier("for")
             }
             DatePicker("When", selection: $content.at)
             if pairChoices.count > 1 {
                 Picker("Calendar", selection: $calendarID) {
-                    ForEach(pairChoices) { c in Text(engine.displayName(c)).tag(Optional(c.id)) }
+                    ForEach(pairChoices) { c in Text(engine.displayName(c, host: host)).tag(Optional(c.id)) }
                 }
             }
             Stepper(value: $content.durationMinutes, in: 0...600, step: 5) {
@@ -265,7 +266,7 @@ struct PrivateEntryEditor: View {
             if !content.solo { whoPicker }
         } footer: {
             if forOther, let pair {
-                Text("For \(engine.displayName(pair)): who comes from their partner list.")
+                Text("For \(engine.displayName(pair, host: host)): who comes from their partner list.")
             } else if content.needsWho {
                 Text("Turn on Solo or pick who. Until then it shows as a hollow heart.")
             }

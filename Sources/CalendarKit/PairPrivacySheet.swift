@@ -9,6 +9,7 @@ import SwiftUI
 /// too, the partner list both share, and cycle settings. Pushed from the
 /// pair's row in the calendar settings.
 public struct PairPrivacySheet: View {
+    @Environment(\.calendarHostPeople) private var host
     let engine: CalendarEngine
     let calendarID: UUID
     /// The partner a swipe asked to remove. The dialog hangs off the List, not
@@ -30,7 +31,7 @@ public struct PairPrivacySheet: View {
                 // whoever has it on.
                 ForEach(engine.cyclePeople(in: c), id: \.self) { person in
                     CycleSettingsSection(engine: engine, pair: c, person: person,
-                                         title: person == engine.config.currentUserID ? "Your cycle" : "\(engine.displayName(c))’s cycle")
+                                         title: person == engine.config.currentUserID ? "Your cycle" : "\(engine.displayName(c, host: host))’s cycle")
                 }
             }
             .calendarBackdrop(engine)
@@ -82,6 +83,7 @@ enum ConsentState: Equatable {
 }
 
 private struct ConsentSection: View {
+    @Environment(\.calendarHostPeople) private var host
     let engine: CalendarEngine
     let pair: CalCalendar
     let kind: CalConsentKind
@@ -97,7 +99,7 @@ private struct ConsentSection: View {
                 // Off is always allowed; on needs friends (the server refuses a frozen pair).
                 .disabled(pair.frozen && !mine)
                 .accessibilityIdentifier(kind == .intimate ? "privacy.intimate" : "privacy.cycle")
-            if let line = state.text(engine.displayName(pair), kind) {
+            if let line = state.text(engine.displayName(pair, host: host), kind) {
                 Text(line)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
