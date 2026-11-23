@@ -58,6 +58,8 @@ Period 3-1 (5 days), bleeding 3-17..3-18, period 3-29 (5 days)
 
 The existing test (`aMidCycleBleedIsNeitherAStartNorPartOfThePeriod`) uses a single mid-cycle day, so it passes.
 
+Treating the bleed as a block isn't enough on its own; it needs a tie-break (see Plan, step 2).
+
 **Fix:** treat a run of bleeding that is skipped as mid-cycle as one block, using the same "3 days apart" rule as a period. No day inside that block can start a period. The next period can begin only after the block. Add tests for a 6-day bleed that crosses day 15, and for a bleed on day 17 followed by a real period 12 days later.
 
 ### 2. Late periods aren't handled (Cycle.swift:217-262)
@@ -216,12 +218,157 @@ The settings limits (cycle 20–45, period 1–10) and the measured period limit
 - The colors follow the usual convention: pink for periods, teal for the fertile window, and a lighter or dashed look for expected days. Clue, Flo and Natural Cycles look similar (see mvCalendar `docs/research/intimacy/leaf-apps.md`).
 - The disclaimer "Estimates only. Not a medical device or birth control." matches the evidence on calendar-only apps (Setton 2016, Johnson 2018).
 
-## Suggested order of work
+## Decisions (agreed with Travis, 2026-11-22)
 
-1. Bug 1 (the mid-cycle block) and bug 2 (late period), each with tests that fail on the current code.
-2. The faint band and the widening (5 + 6), shipped with the move from −14 to −13 (4), plus the legend and the wording.
-3. Rejecting outlier gaps and using the median (3 + 9).
-4. Reword the comment (7). Add the window to the day detail on short cycles (8).
+1. **Late periods:**
+   - Correct the cycle day as soon as the predicted date passes, counting from the last logged start.
+   - Hide fertility marks at the same moment. The next window is about two weeks after the missed date, so this costs nothing.
+   - Say it's late only after a grace period: half the person's recent shortest-to-longest spread, kept between 2 and 5 days.
+   - Wording: "Not logged yet · N days past the estimate", not "Late". The person may just have forgotten to log, and the partner sees it too.
+   - Show it in the day detail only, never on the grid. The kit already has no reminders so that nothing announces itself outside the app.
+2. **Ovulation is 13 days before the next start.** This matches Apple and sits between Bull's 12.4 and the older 14. With the faint band covering a day or two either side, the exact number matters less.
+3. **The faint "fertility possible" band: yes.** "Lower chance, not zero" for unmarked days: yes, in principle. Where it goes is open question 2. The band's opacity is picked by eye in the Lab, in light and dark.
+
+## Plan
+
+**Scope:** CalendarKit only, on one branch, in about 5 commits.
+
+**Each commit must:**
+- pass the unit tests on CalendarLab27;
+- add tests that fail on the old code first.
+
+**Not affected:**
+- No server, proto, storage or sync changes.
+- No UI tests depend on the estimates.
+
+**Rough size:** 1.5 to 2 days, about 350–500 lines changed including tests. Most of the time goes to the late-period behavior, tuning the band visually, and the Lab checks, not to the math.
+
+Re-reading the code before planning turned up three things the findings above didn't cover:
+- **The block fix alone breaks a different case.** Take a bleed on cycle day 17 with the real period 12 days later. The bleed is past the 15-day line, so it's taken as the period, and the real period then falls inside a mid-cycle block and disappears. A fixed 15-day line can't settle which of two close bleeds is the period, so step 2 adds a tie-break.
+- **The settings sheet shows the next period** (`PairPrivacySheet.swift:303`, "Next period, estimated"). During a late period that's a date in the past, so step 4 covers it.
+- **"Lower chance, not zero" clashes with the design review of 2026-11-16.** That review decided an empty day shows no cycle card. See open question 2.
+
+### Step 1. Compute the cycle once (no change in behavior)
+
+- **Why:** `info(on:)` recalculates the full list of periods about six times for every day drawn, and every later step adds work per day.
+- **Change:** the estimator works out the periods, starts, gaps and both lengths once, in `init`, and stores them.
+- **Tests:** all existing tests pass unchanged.
+
+### Step 2. Finding periods: whole bleeds, not single days (bug 1)
+
+**The rule:**
+- First group logged days into bleeds: days at most 3 apart, using the same flows and marks as today.
+- A bleed that begins less than 15 days after the last period's start is mid-cycle bleeding **as a whole**. No day inside it can start a period.
+- **Tie-break** (open question 1): if two bleeds both qualify and are less than 15 days apart, the period is the one marked "Period started"; failing that, the one nearer to when the period was due (last start plus the usual cycle length).
+- An explicit "Period started" mark at least 15 days after the last start still begins a period, even inside a bleed.
+
+**What stays the same (MVCALE-52):**
+- open marked periods;
+- "Period ended" within 15 days;
+- ignoring stray marks.
+
+**Tests:**
+- the 6-day bleed crossing day 15;
+- the day-17 bleed followed by the real period;
+- a start mark inside a bleed;
+- all existing tests.
+
+### Step 3. Cycle length: drop odd gaps, use the median (bugs 3 and 9)
+
+**The rule:**
+- Keep gaps between 15 and 60 days, as now.
+- With 3 or more gaps, drop any gap over 1.6× or under 0.6× the median, then use the median of the last 6.
+- With fewer than 3 gaps, use the mean, as now. A pattern of 28 then 56 can't be caught until a third cycle (open question 4).
+
+**Tests:**
+- 28, 28, 56 gives 28;
+- a real 18-day cycle in a 28-day person is kept.
+
+### Step 4. Late periods (bug 2)
+
+**When it applies:**
+- `today` drives the late-period behavior. When `today` isn't given, nothing changes from now.
+- A period counts as overdue when today is past the last start plus the cycle length and nothing has been logged since.
+
+**While overdue:**
+- **Cycle day:** counts from the last logged start.
+- **The missed expected-period band:** stays whole (open question 3).
+- **Hidden:** every later predicted period, fertile window and faint band.
+
+**The "not logged yet" line:**
+- **Grace period:** half the recent shortest-to-longest spread, kept between 2 and 5 days, or 3 days with fewer than 2 gaps.
+- **Where:** after the grace period, today's day detail shows "Not logged yet · N days past the estimate". That counts as something on the day, so the card shows.
+
+**Settings sheet:** while overdue, the "Next period, estimated" row shows the date with "· not logged yet" instead of a date in the past.
+
+**Tests:**
+- the late run from bug 2: day 40, nothing predicted after the due date;
+- the edges of the grace period.
+
+### Step 5. Ovulation at 13 days, the faint band, and the smaller findings (4–8)
+
+**Ovulation:**
+- Next start − 13.
+- Update the 4 test expectations that pin 14.
+
+**The faint band:**
+- **New day kind:** `.fertilePossible`.
+- **Range:** with 3 or more gaps, cycle days from shortest − 18 to longest − 11. Otherwise days 8–19, widened to cycle length − 18 / − 11 when that's wider.
+- **Which cycles get it:** every cycle with a start, logged or predicted, except while overdue.
+- **What wins over it:** periods, expected periods and the main fertile window.
+
+**Views:**
+- **Ranking:** shifted so the faint band is lowest.
+- **Look:** band opacity picked by eye in the Lab, in light and dark, with no dashed edges.
+- **Words:** "fertility possible" for VoiceOver and the legend; "Fertility possible · estimate" in the day detail.
+- **Drop marks:** `dropsFollowTheCycleMark` gets the new kind.
+
+**Short cycles (8):** when a period day also falls in the fertile window, the period line adds "· fertile window".
+
+**Comment (7):** "calendar method (ACOG)" becomes "a calendar estimate".
+
+**Tests:**
+- regular cycles: faint band on days 8–10 and 17–19, around a core window on days 11–16;
+- irregular cycles: a wide band;
+- few cycles: the days 8–19 fallback;
+- overlaps with periods and expected periods.
+
+### Step 6. Docs
+
+- Add a status section to this file.
+- Record the changed plan decisions (10–13) in mvCalendar's `docs/research/intimacy/sprint-decisions.md`. That's a separate commit in that repo.
+
+### Checks before calling it done
+
+**Unit tests:** pass on CalendarLab27.
+
+**The Lab, in light and dark:**
+- a regular cycle;
+- an irregular one;
+- a late period;
+- both partners tracking.
+
+**Rollout catch:** each phone computes its own estimates. Until both phones in a pair update, the two people can see different bands for the same cycle.
+
+### Open questions (for the final discussion, before the go)
+
+1. **Step 2's tie-break:** prefer a marked start, then the bleed nearer the due date. OK?
+2. **Where "Lower chance, not zero" goes:** recommended in the legend, keeping the "empty day shows no card" rule from the design review, rather than a card on almost every day.
+3. **The missed expected-period band during a late period:** keep it whole (recommended), or cut it at today?
+4. **Mean vs median with only 2 gaps:** leaving that window is acceptable (recommended).
+
+## Related findings from the MVCALE-120 review (host people)
+
+Commits `e81ced2` and `6878f24` (host names and photos) don't change the estimates or this plan. Where they touch cycle views (`CycleDaySection`, `AddMenu`, `PairPrivacySheet`), they only change how names are looked up.
+
+One thing from that review does affect the cycle screens. `6878f24` made the author badge name the *person* instead of the *pair*: a pair named "Date nights" no longer reads "Added by Date nights". These cycle-related spots still label a person with the pair's name:
+
+- `PrivateViews.swift`, `CycleDaySection.name`: the other person's row in the Cycle card.
+- `PrivateViews.swift`, `AddMenu.periodPeople`: "Log period → Date nights".
+- `PairPrivacySheet.swift:34`: the section title, "Date nights’s cycle".
+- Next to them on the intimate side: `PrivateEntryRow.addedBy` ("Added by Date nights"), and in `PrivateEntryEditor` the "For" picker, its footer and the no-partners text.
+
+**Fix:** the one `6878f24` used, `engine.personName(pair.otherID, host: host) ?? engine.displayName(pair, host: host)`. These are naming fixes under MVCALE-120, so they belong to that work rather than this branch. If they're still open when the cycle branch starts, step 5 can take the two cycle ones (`CycleDaySection.name`, `PairPrivacySheet`), since it changes those views anyway.
 
 ## Backend (mvCalendar)
 
