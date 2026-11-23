@@ -104,7 +104,7 @@ struct EventEditorView: View {
                 // Who will see it matters when choosing where it goes; once
                 // it's there, saying so on every edit is noise (Frond's audit).
                 if isNew, let calendar {
-                    Text("You and \(engine.displayName(calendar, host: host)) both see and can change it.")
+                    Text("You and \(engine.personName(calendar.otherID, in: calendar, host: host)) both see and can change it.")
                 }
             }
             Section("Notes") {

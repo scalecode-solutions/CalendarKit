@@ -58,4 +58,51 @@ struct HostPeopleTests {
         #expect(engine.shortName(pair, host: CalendarHostPeople(name: { _ in "Sam R." })) == "Sam R.")
         #expect(engine.shortName(pair, host: CalendarHostPeople(name: { _ in "Sam R." }, shortName: { _ in "Sammy" })) == "Sammy")
     }
+
+    /// MVCALE-125: a line about a person names the person, even inside a pair
+    /// someone typed a name for ("Added by Sam", not "Added by Date nights").
+    @Test func aPersonIsNamedAsThePersonInANamedPair() async {
+        let (engine, server, _) = makeEngine()
+        let sam = server.addFriend(name: "Sam Reed")
+        let pairID = server.addPair(with: sam, name: "Date nights", friend: false)
+        await engine.refresh()
+        let pair = engine.calendar(pairID)!
+        let me = engine.config.currentUserID
+        let host = CalendarHostPeople(name: { $0 == sam ? "Sunny Day" : nil })
+        // The pair keeps its typed name; the person is the host's, then the directory's.
+        #expect(engine.displayName(pair, host: host) == "Date nights")
+        #expect(engine.personName(sam, in: pair, host: host) == "Sunny Day")
+        #expect(engine.personName(sam, in: pair, host: .none) == "Sam Reed")
+        // Nobody knows them: the pair's label, never "Someone" over a name we have.
+        #expect(engine.personName(UUID(), in: pair, host: host) == "Date nights")
+        // Whose cycle a row is.
+        #expect(CycleDaySection.name(sam, pair: pair, engine: engine, host: host) == "Sunny Day")
+        #expect(CycleDaySection.name(me, pair: pair, engine: engine, host: host) == "You")
+        // "Added by …" names whoever made the entry.
+        let entry = CalPrivateEntry(calendarID: pairID, content: CalPrivateContent(at: Date()), createdBy: sam)
+        #expect(PrivateEntryRow.addedBy(entry, engine: engine, host: host) == "Sunny Day")
+        #expect(PrivateEntryRow.addedBy(entry, engine: engine, host: .none) == "Sam Reed")
+    }
+
+    /// 6878f24: inside one pair, the other person's items badge as the person,
+    /// across pairs as the pair; mine say "you".
+    @Test func theInPairBadgeNamesThePerson() async {
+        let (engine, server, _) = makeEngine()
+        let sam = server.addFriend(name: "Sam Reed")
+        let pairID = server.addPair(with: sam, name: "Date nights", friend: false)
+        let event = server.externalCreate(pairID, allDay("Dinner", 2026, 11, 10))
+        await engine.refresh()
+        let pair = engine.calendar(pairID)!
+        let me = engine.config.currentUserID
+        let host = CalendarHostPeople(name: { $0 == sam ? "Sunny Day" : nil })
+        func occurrence(by author: UUID) -> CalOccurrence {
+            CalOccurrence(id: event.id.uuidString, event: event, seriesID: nil, originalStart: nil, when: event.fields.when,
+                          calendar: pair, label: nil, color: pair.displayColor, author: author)
+        }
+        #expect(AuthorBadge.author(of: occurrence(by: sam), engine: engine, host: host, inPair: true)?.name == "Sunny Day")
+        #expect(AuthorBadge.author(of: occurrence(by: sam), engine: engine, host: .none, inPair: true)?.name == "Sam Reed")
+        #expect(AuthorBadge.author(of: occurrence(by: me), engine: engine, host: host, inPair: true)?.name == "you")
+        // Across every pair, the badge is the pair.
+        #expect(AuthorBadge.author(of: occurrence(by: sam), engine: engine, host: host, inPair: false)?.name == "Date nights")
+    }
 }

@@ -874,7 +874,7 @@ struct AuthorBadge: View {
                                personID: me)
         }
         return AuthorBadge(contact: engine.people[o.author],
-                           name: engine.personName(o.author, host: host) ?? engine.displayName(o.calendar, host: host),
+                           name: engine.personName(o.author, in: o.calendar, host: host),
                            tint: o.calendar.displayColor, addedByOther: true, size: size, personID: o.author)
     }
 }

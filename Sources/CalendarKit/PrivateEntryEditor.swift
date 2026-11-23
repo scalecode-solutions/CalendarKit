@@ -93,7 +93,7 @@ struct PrivateEntryEditor: View {
     private var pair: CalCalendar? { calendarID.flatMap { engine.calendar($0) } }
     /// Where partners come from, when there are none yet.
     private var noPartners: String {
-        let who = pair.map { engine.displayName($0, host: host) } ?? "them"
+        let who = pair.map { engine.personName($0.otherID, in: $0, host: host) } ?? "them"
         if forOther { return "\(who) hasn't added any partners yet. They add their own under Privacy." }
         return "No partners yet. Add them under Privacy in your settings with \(who)."
     }
@@ -202,7 +202,7 @@ struct PrivateEntryEditor: View {
             if let pair {
                 Picker("For", selection: forWho) {
                     Text("You").tag(engine.config.currentUserID)
-                    Text(engine.displayName(pair, host: host)).tag(pair.otherID)
+                    Text(engine.personName(pair.otherID, in: pair, host: host)).tag(pair.otherID)
                 }
                 .accessibilityIdentifier("for")
             }
@@ -266,7 +266,7 @@ struct PrivateEntryEditor: View {
             if !content.solo { whoPicker }
         } footer: {
             if forOther, let pair {
-                Text("For \(engine.displayName(pair, host: host)): who comes from their partner list.")
+                Text("For \(engine.personName(pair.otherID, in: pair, host: host)): who comes from their partner list.")
             } else if content.needsWho {
                 Text("Turn on Solo or pick who. Until then it shows as a hollow heart.")
             }

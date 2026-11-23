@@ -125,7 +125,7 @@ public struct PairSettingsView: View {
                             .accessibilityIdentifier("pair.privacy")
                     } footer: {
                         Text(c.frozen ? "You two aren't friends any more, so this calendar is read-only."
-                                      : "These belong to your calendar with \(engine.displayName(c, host: host)): you both see and change them.")
+                                      : "These belong to your calendar with \(engine.personName(c.otherID, in: c, host: host)): you both see and change them.")
                     }
                 }
                 .calendarBackdrop(engine)

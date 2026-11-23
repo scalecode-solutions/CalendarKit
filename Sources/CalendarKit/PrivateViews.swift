@@ -315,7 +315,7 @@ struct AddMenu: View {
     @ViewBuilder private func periodPeople(_ pair: CalCalendar, _ day: CalDate) -> some View {
         // Only whoever tracks their cycle here (MVCALE-51).
         ForEach(engine.cyclePeople(in: pair), id: \.self) { person in
-            Menu(person == me ? "You" : engine.displayName(pair, host: host)) {
+            Menu(person == me ? "You" : engine.personName(person, in: pair, host: host)) {
                 CycleFlowButtons(engine: engine, pair: pair, person: person, day: day)
             }
         }
@@ -477,8 +477,11 @@ struct PrivateEntryRow: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    private var addedBy: String {
-        engine.calendar(entry.calendarID).map { engine.displayName($0, host: host) } ?? "them"
+    private var addedBy: String { Self.addedBy(entry, engine: engine, host: host) }
+
+    /// "Added by …": whoever made the entry, by name, not the pair's name.
+    @MainActor static func addedBy(_ entry: CalPrivateEntry, engine: CalendarEngine, host: CalendarHostPeople) -> String {
+        engine.calendar(entry.calendarID).map { engine.personName(entry.createdBy, in: $0, host: host) } ?? "them"
     }
 }
 
@@ -596,8 +599,11 @@ struct CycleDaySection: View {
         }
     }
 
-    private func name(_ person: UUID) -> String {
-        person == me ? "You" : engine.displayName(pair, host: host)
+    private func name(_ person: UUID) -> String { Self.name(person, pair: pair, engine: engine, host: host) }
+
+    /// Whose cycle a row is: "You", or the person by name, not the pair's name.
+    @MainActor static func name(_ person: UUID, pair: CalCalendar, engine: CalendarEngine, host: CalendarHostPeople) -> String {
+        person == engine.config.currentUserID ? "You" : engine.personName(person, in: pair, host: host)
     }
 }
 

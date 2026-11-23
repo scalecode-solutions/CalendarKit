@@ -31,7 +31,7 @@ public struct PairPrivacySheet: View {
                 // whoever has it on.
                 ForEach(engine.cyclePeople(in: c), id: \.self) { person in
                     CycleSettingsSection(engine: engine, pair: c, person: person,
-                                         title: person == engine.config.currentUserID ? "Your cycle" : "\(engine.displayName(c, host: host))’s cycle")
+                                         title: person == engine.config.currentUserID ? "Your cycle" : "\(engine.personName(person, in: c, host: host))’s cycle")
                 }
             }
             .calendarBackdrop(engine)
@@ -99,7 +99,7 @@ private struct ConsentSection: View {
                 // Off is always allowed; on needs friends (the server refuses a frozen pair).
                 .disabled(pair.frozen && !mine)
                 .accessibilityIdentifier(kind == .intimate ? "privacy.intimate" : "privacy.cycle")
-            if let line = state.text(engine.displayName(pair, host: host), kind) {
+            if let line = state.text(engine.personName(pair.otherID, in: pair, host: host), kind) {
                 Text(line)
                     .font(.footnote)
                     .foregroundStyle(.secondary)

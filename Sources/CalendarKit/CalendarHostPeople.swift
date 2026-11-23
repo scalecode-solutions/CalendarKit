@@ -93,4 +93,11 @@ extension CalendarEngine {
         if let n = host.hostName(id) { return n }
         return people[id].flatMap { $0.name.isEmpty ? nil : $0.name }
     }
+
+    /// A person inside a pair, for lines about the person ("Added by …",
+    /// "…'s cycle"): the host's name, else the directory's, else the pair's
+    /// label. A typed pair name never stands in for someone the kit can name.
+    public func personName(_ id: UUID, in c: CalCalendar, host: CalendarHostPeople) -> String {
+        personName(id, host: host) ?? displayName(c, host: host)
+    }
 }
