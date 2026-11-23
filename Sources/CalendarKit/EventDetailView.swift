@@ -28,9 +28,14 @@ struct EventDetailView: View {
         return (engine.personName(a, host: host) ?? "Someone", p, a)
     }
     /// Who changed it last, when that's the other person and they didn't add it.
-    private var changedBy: CalContact? {
-        let u = event.updatedBy
-        return u == me || u == occurrence.author ? nil : engine.people[u]
+    private var changedBy: String? {
+        Self.changedBy(event.updatedBy, author: occurrence.author, me: me, engine: engine, host: host)
+    }
+
+    /// The last editor's name (host first), when it's someone other than me
+    /// and the author; nil when nobody knows them (the row is left out).
+    static func changedBy(_ u: UUID, author: UUID, me: UUID, engine: CalendarEngine, host: CalendarHostPeople) -> String? {
+        u == me || u == author ? nil : engine.personName(u, host: host)
     }
 
     var body: some View {
@@ -70,7 +75,7 @@ struct EventDetailView: View {
                     .accessibilityElement(children: .combine)
                 }
                 if let who = changedBy {
-                    DetailRow(icon: "pencil") { Text("Last changed by \(who.name)") }
+                    DetailRow(icon: "pencil") { Text("Last changed by \(who)") }
                 }
             }
             if !event.fields.notes.isEmpty {

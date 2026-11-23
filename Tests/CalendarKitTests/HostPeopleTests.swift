@@ -33,6 +33,20 @@ struct HostPeopleTests {
         #expect(engine.personName(sam, host: host) == "Sunny Day")
     }
 
+    @Test func theDetailNamesWhoChangedItTheHostsWay() async {
+        let (engine, server, _) = makeEngine()
+        let sam = server.addFriend(name: "Sam Reed")
+        await engine.refresh()
+        let me = engine.config.currentUserID
+        let host = CalendarHostPeople(name: { $0 == sam ? "Sunny Day" : nil })
+        #expect(EventDetailView.changedBy(sam, author: me, me: me, engine: engine, host: host) == "Sunny Day")
+        #expect(EventDetailView.changedBy(sam, author: me, me: me, engine: engine, host: .none) == "Sam Reed")
+        // Not shown for me, for the author, or for someone nobody knows.
+        #expect(EventDetailView.changedBy(me, author: sam, me: me, engine: engine, host: host) == nil)
+        #expect(EventDetailView.changedBy(sam, author: sam, me: me, engine: engine, host: host) == nil)
+        #expect(EventDetailView.changedBy(UUID(), author: me, me: me, engine: engine, host: host) == nil)
+    }
+
     @Test func aHostNameIsNeverSplit() async {
         let (engine, server, _) = makeEngine()
         let sam = server.addFriend(name: "Sam Reed")
