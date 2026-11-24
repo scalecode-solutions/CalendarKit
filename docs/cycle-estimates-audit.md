@@ -8,6 +8,23 @@ Where the code is:
 - `Sources/CalendarKit/PrivateViews.swift`: the grid bands (`CycleBand`), the drops (`DropMark`), which mark wins a day (`PrivateMarks.rank`), the day detail and the legend.
 - The server (mvCalendar) only stores the days and settings, encrypted; it does no estimating. See "Backend" at the end.
 
+## Status (2026-11-24): built (MVCALE-127)
+
+All six steps are built on branch `cycle/estimates-127`, each reviewed at its commit (Stipe, Frond). Research behind the changes from the plan below, all in mvCalendar `docs/research/intimacy/`: `cycle-numbers.md` (Frond: the figures, verified or not), `cycle-unsettled-q5.md` (Stipe: unsettled cycles), `cycle-apps.md` (Leaf: other apps, and open-source trackers read in code), `cycle-wording.md` (Torsion: wording and the regulatory line).
+
+What was built, and where it differs from the plan:
+
+| Step | Built | Changed from the plan |
+|---|---|---|
+| 1 | Periods, starts and both lengths computed once in `init` | — |
+| 2 | A mid-cycle bleed is one block; the tie-break | The tie-break is marked → **more bleeding days** → nearer the due date (Stipe's review, Travis): a 1-day spot can't take a real short cycle's period. Known edge: someone who logs only each period's first day comes down to nearness; a "Period started" mark settles it. |
+| 3 | Odd gaps dropped, the median of the last 6 | **A gap over 60 days resets the history** (a birth, the pill, perimenopause). The forgotten-month drop is the Apple Women's Health Study's artifact rule, **median gap + median change + 15** (the change measured with the longest gap left out), not 0.6× / 1.6×, and nothing is dropped on the short side. |
+| 4 | Late periods | The grace period is kept between **3** and 5 days (Apple counts ±3 as on time). The line is "Not logged yet · N days past the estimate", and past 60 days since the last start just "Cycle day N". **Both people see it** (Travis), as does the settings row's "· not logged yet". |
+| 5 | Ovulation at −13, the faint band, short-cycle line, comment | **Unsettled cycles** (open question 5, automatic): a reset with fewer than 3 cycles since, or a median change between consecutive cycles of 9 days or more. While unsettled: the faint band only, the next period as a range, late from the range's end, and "Cycles vary right now, so this is a wider estimate." The manual switch is MVCALE-176. The faint band goes only as far as the predictions do: no lone band past the last estimate (Frond's review). |
+| 6 | This section, and mvCalendar's sprint-decisions.md plus the four research docs (mvCalendar branch `docs/127-cycle-decisions`) | — |
+
+Open questions 1–5 were decided as recommended (Travis, 2026-11-24). Follow-ups: MVCALE-176 (a manual "unsettled" switch, e.g. after a birth), MVCALE-177 ("don't count this cycle").
+
 ## Summary
 
 | # | Finding | Kind | Priority |
