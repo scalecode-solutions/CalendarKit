@@ -17,17 +17,28 @@ struct CycleLateViewTests {
     }
 
     @Test func theLateLine() {
-        #expect(CycleDaySection.lateLine(CalCycleDayInfo(kind: nil, cycleDay: 33, daysPastEstimate: 4))
+        #expect(CycleDaySection.lateLine(CalCycleDayInfo(kind: nil, cycleDay: 33, daysPastEstimate: 4), unsettled: false)
                 == "Not logged yet · 4 days past the estimate")
-        #expect(CycleDaySection.lateLine(CalCycleDayInfo(kind: nil, cycleDay: 30, daysPastEstimate: 1))
+        #expect(CycleDaySection.lateLine(CalCycleDayInfo(kind: nil, cycleDay: 30, daysPastEstimate: 1), unsettled: false)
                 == "Not logged yet · 1 day past the estimate")
         // Past 60 days since the last start: only the cycle day.
-        #expect(CycleDaySection.lateLine(CalCycleDayInfo(kind: nil, cycleDay: 61, daysPastEstimate: 33)) == "Cycle day 61")
-        #expect(CycleDaySection.lateLine(CalCycleDayInfo(kind: nil, cycleDay: 60, daysPastEstimate: 32))
+        #expect(CycleDaySection.lateLine(CalCycleDayInfo(kind: nil, cycleDay: 61, daysPastEstimate: 33), unsettled: false) == "Cycle day 61")
+        #expect(CycleDaySection.lateLine(CalCycleDayInfo(kind: nil, cycleDay: 60, daysPastEstimate: 32), unsettled: false)
                 == "Not logged yet · 32 days past the estimate")
-        #expect(CycleDaySection.lateLine(CalCycleDayInfo(kind: nil, cycleDay: 20)) == nil)
+        #expect(CycleDaySection.lateLine(CalCycleDayInfo(kind: nil, cycleDay: 20), unsettled: false) == nil)
         // Never the word "late".
-        #expect(CycleDaySection.lateLine(CalCycleDayInfo(kind: nil, cycleDay: 33, daysPastEstimate: 4))?.lowercased().contains("late") == false)
+        #expect(CycleDaySection.lateLine(CalCycleDayInfo(kind: nil, cycleDay: 33, daysPastEstimate: 4), unsettled: false)?.lowercased().contains("late") == false)
+    }
+
+    /// Unsettled: the days count from the end of the expected range, not the
+    /// dashed estimate, and the words say so. Past 60 it's still the cycle day.
+    @Test func theLateLineWhileUnsettled() {
+        #expect(CycleDaySection.lateLine(CalCycleDayInfo(kind: nil, cycleDay: 45, daysPastEstimate: 9), unsettled: true)
+                == "Not logged yet · 9 days past the expected range")
+        #expect(CycleDaySection.lateLine(CalCycleDayInfo(kind: nil, cycleDay: 37, daysPastEstimate: 1), unsettled: true)
+                == "Not logged yet · 1 day past the expected range")
+        #expect(CycleDaySection.lateLine(CalCycleDayInfo(kind: nil, cycleDay: 61, daysPastEstimate: 25), unsettled: true) == "Cycle day 61")
+        #expect(CycleDaySection.lateLine(CalCycleDayInfo(kind: nil, cycleDay: 45, daysPastEstimate: 9), unsettled: true)?.lowercased().contains("late") == false)
     }
 
     /// A day with only a late line still shows the card (the design review's

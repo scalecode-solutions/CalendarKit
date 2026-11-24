@@ -582,7 +582,7 @@ struct CycleDaySection: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("cycleUnsettled")
             }
-            if let info, let late = CycleDaySection.lateLine(info) {
+            if let info, let late = CycleDaySection.lateLine(info, unsettled: est?.unsettled == true) {
                 // Both people see it (Travis, 2026-11-24: the pair's same screen).
                 Text(late)
                     .font(.body)
@@ -628,10 +628,13 @@ struct CycleDaySection: View {
     /// estimate", never "late" (it may only be unlogged, and the partner sees
     /// it too). Past 60 days since the last start, only the cycle day: a
     /// count of days past stops meaning much, and keeps saying "late".
-    static func lateLine(_ info: CalCycleDayInfo) -> String? {
+    /// While cycles are unsettled the count runs from the end of the expected
+    /// range, not the dashed (median) estimate, so it says "the expected
+    /// range" (Travis, 2026-11-24, from the Lab pass).
+    static func lateLine(_ info: CalCycleDayInfo, unsettled: Bool) -> String? {
         guard let n = info.daysPastEstimate else { return nil }
         if let d = info.cycleDay, d > 60 { return "Cycle day \(d)" }
-        return "Not logged yet · \(n) day\(n == 1 ? "" : "s") past the estimate"
+        return "Not logged yet · \(n) day\(n == 1 ? "" : "s") past the \(unsettled ? "expected range" : "estimate")"
     }
 
     /// "Period expected · estimate".
