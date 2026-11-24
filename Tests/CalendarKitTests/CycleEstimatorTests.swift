@@ -278,6 +278,59 @@ struct CycleEstimatorTests {
         #expect(e.info(on: CalDate(2026, 10, 28)).cycleDay == 2)
     }
 
+    // MARK: late periods (MVCALE-127 step 4)
+
+    /// The audit's bug 2: 28-day cycles, the last start 10-27, the next
+    /// estimated for 11-24, nothing logged by 12-05. The cycle day counts on
+    /// from 10-27, the missed expected period stays whole, and nothing is
+    /// predicted after it.
+    @Test func aLatePeriodCountsOnAndPredictsNothingAfter() {
+        let e = CalCycleEstimator(days: regular, settings: nil)
+        let today = CalDate(2026, 12, 5)
+        func kind(_ m: Int, _ d: Int) -> CalCycleDayInfo.Kind? { e.info(on: CalDate(2026, m, d), today: today).kind }
+        #expect(e.overdue(today: today)! == (CalDate(2026, 11, 24), 11))
+        #expect(e.cycleDay(on: today, today: today) == 40)
+        #expect(e.info(on: today, today: today).cycleDay == 40)
+        #expect(e.cycleDay(on: CalDate(2026, 11, 24), today: today) == 29)
+        // The missed expected period, whole.
+        #expect(kind(11, 24) == .predictedPeriod)
+        #expect(kind(11, 27) == .predictedPeriod)
+        #expect(kind(11, 28) == nil)
+        // Nothing after it: no window (12-03..12-08 was one), no period.
+        for d in 3...8 { #expect(kind(12, d) == nil) }
+        #expect(kind(12, 22) == nil)
+        // The cycle before it keeps its window.
+        #expect(kind(11, 10) == .fertile(ovulation: true))
+        // Without today, or on the estimate itself, nothing changes.
+        #expect(e.info(on: CalDate(2026, 12, 8)).kind == .fertile(ovulation: true))
+        #expect(e.overdue(today: CalDate(2026, 11, 24)) == nil)
+        #expect(e.info(on: CalDate(2026, 12, 8), today: CalDate(2026, 11, 24)).kind == .fertile(ovulation: true))
+        #expect(e.cycleDay(on: CalDate(2026, 11, 30), today: CalDate(2026, 11, 24)) == 7)
+    }
+
+    /// The day detail says so only after the grace period, and only on
+    /// today: 3 days for steady cycles (11-24 due: 11-27 is still within it).
+    @Test func notLoggedYetAfterTheGracePeriod() {
+        let e = CalCycleEstimator(days: regular, settings: nil)
+        #expect(e.grace == 3)
+        func past(_ m: Int, _ d: Int) -> Int? { e.info(on: CalDate(2026, m, d), today: CalDate(2026, m, d)).daysPastEstimate }
+        #expect(past(11, 27) == nil)
+        #expect(past(11, 28) == 4)
+        #expect(past(12, 5) == 11)
+        // Another day than today never says it.
+        #expect(e.info(on: CalDate(2026, 12, 1), today: CalDate(2026, 12, 5)).daysPastEstimate == nil)
+    }
+
+    /// The grace period: half the recent shortest-to-longest spread, kept
+    /// between 3 and 5 days; 3 with fewer than 2 gaps.
+    @Test func theGracePeriodFollowsTheSpread() {
+        #expect(CalCycleEstimator(days: starts([28, 36]), settings: nil).grace == 4)
+        #expect(CalCycleEstimator(days: starts([28, 35]), settings: nil).grace == 4) // 3.5 rounds up
+        #expect(CalCycleEstimator(days: starts([24, 35, 26, 33, 25, 34]), settings: nil).grace == 5) // 5.5, kept at 5
+        #expect(CalCycleEstimator(days: starts([28, 30]), settings: nil).grace == 3) // 1, kept at 3
+        #expect(CalCycleEstimator(days: starts([28]), settings: nil).grace == 3)
+    }
+
     @Test func flowsAndStarting() {
         #expect(CalFlow.allCases.filter(\.startsAPeriod) == [.light, .medium, .heavy])
     }

@@ -501,11 +501,11 @@ struct CycleDaySection: View {
     /// Whether the day has a logged day or an estimate for anyone tracked.
     @MainActor static func hasSomething(engine: CalendarEngine, pair: CalCalendar, day: CalDate) -> Bool {
         let today = CalDate(Date(), in: .current)
-        return engine.cyclePeople(in: pair).contains { engine.cycle(of: $0, in: pair)?.info(on: day, today: today).kind != nil }
+        return engine.cyclePeople(in: pair).contains { engine.cycle(of: $0, in: pair)?.info(on: day, today: today).hasSomething == true }
     }
 
     var body: some View {
-        let shown = engine.cyclePeople(in: pair).filter { engine.cycle(of: $0, in: pair)?.info(on: day, today: today).kind != nil }
+        let shown = engine.cyclePeople(in: pair).filter { engine.cycle(of: $0, in: pair)?.info(on: day, today: today).hasSomething == true }
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Label("Cycle", systemImage: "drop.fill")
@@ -565,6 +565,13 @@ struct CycleDaySection: View {
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("cycleEstimate")
             }
+            if let info, let late = CycleDaySection.lateLine(info) {
+                // Both people see it (Travis, 2026-11-24: the pair's same screen).
+                Text(late)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("cycleLate")
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
@@ -583,6 +590,17 @@ struct CycleDaySection: View {
     /// The day before this one was the last.
     private func endedYesterday(_ person: UUID) {
         engine.markPeriodEnd(in: pair, for: person, on: day.adding(days: -1))
+    }
+
+    /// Today, when a period is past its estimate by more than the grace
+    /// period (MVCALE-127 step 4): "Not logged yet · 4 days past the
+    /// estimate", never "late" (it may only be unlogged, and the partner sees
+    /// it too). Past 60 days since the last start, only the cycle day: a
+    /// count of days past stops meaning much, and keeps saying "late".
+    static func lateLine(_ info: CalCycleDayInfo) -> String? {
+        guard let n = info.daysPastEstimate else { return nil }
+        if let d = info.cycleDay, d > 60 { return "Cycle day \(d)" }
+        return "Not logged yet · \(n) day\(n == 1 ? "" : "s") past the estimate"
     }
 
     /// "Period expected · estimate".

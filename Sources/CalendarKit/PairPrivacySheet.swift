@@ -302,8 +302,8 @@ private struct CycleSettingsSection: View {
                 ForEach(1...10, id: \.self) { Text("\($0) day\($0 == 1 ? "" : "s")").tag($0) }
             }
             .accessibilityIdentifier("privacy.periodLength.\(person == engine.config.currentUserID ? "me" : "them")")
-            if let next = est?.predictedStarts(count: 1).first {
-                LabeledContent("Next period, estimated", value: CalFormat.template("EEEMMMd").string(from: next.utcMidnight))
+            if let next = est?.nextPeriodLabel(today: CalDate(Date(), in: .current)) {
+                LabeledContent("Next period, estimated", value: next)
             }
         }
         .disabled(pair.frozen)
@@ -314,5 +314,16 @@ private struct CycleSettingsSection: View {
         if let cycle { s.cycleLength = cycle }
         if let period { s.periodLength = period }
         engine.saveCycleSettings(s)
+    }
+}
+
+extension CalCycleEstimator {
+    /// The settings sheet's "Next period, estimated": "Tue, Dec 22", or
+    /// while past it with none logged, "Tue, Nov 24 · not logged yet" rather
+    /// than a date that's gone by (MVCALE-127 step 4). Both people see it.
+    func nextPeriodLabel(today: CalDate) -> String? {
+        guard let next = predictedStarts(count: 1).first else { return nil }
+        let date = CalFormat.template("EEEMMMd").string(from: next.utcMidnight)
+        return overdue(today: today) == nil ? date : date + " · not logged yet"
     }
 }

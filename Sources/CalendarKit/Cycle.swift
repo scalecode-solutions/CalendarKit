@@ -113,19 +113,28 @@ public struct CalCycleDayInfo: Equatable, Sendable {
         /// The estimated fertile window (ovulation's day included).
         case fertile(ovulation: Bool)
     }
-    public let kind: Kind?
+    public var kind: Kind?
     /// 1-based day of the cycle, when there's a cycle start before it.
     public let cycleDay: Int?
+    /// Today, when the period is past its estimate by more than the grace
+    /// period with none logged: by how many days (MVCALE-127 step 4). Shown
+    /// in the day detail only, never on the grid.
+    public var daysPastEstimate: Int?
     /// The day is past an open period's usual length: ask whether it ended.
     public var askIfEnded = false
     /// The open period this day belongs to, if any (offers "Ended today").
     public var openPeriod: CalPeriod?
 
-    public init(kind: Kind?, cycleDay: Int?, askIfEnded: Bool = false, openPeriod: CalPeriod? = nil) {
+    /// Something for the day detail to show: a mark, or a late line.
+    public var hasSomething: Bool { kind != nil || daysPastEstimate != nil }
+
+    public init(kind: Kind?, cycleDay: Int?, askIfEnded: Bool = false, openPeriod: CalPeriod? = nil,
+                daysPastEstimate: Int? = nil) {
         self.kind = kind
         self.cycleDay = cycleDay
         self.askIfEnded = askIfEnded
         self.openPeriod = openPeriod
+        self.daysPastEstimate = daysPastEstimate
     }
 }
 
@@ -374,9 +383,35 @@ public struct CalCycleEstimator: Sendable {
         return (1...max(1, count)).map { last.adding(days: cycleLength * $0) }
     }
 
+    /// How many days a period may be past its estimate before the day
+    /// detail says so (MVCALE-127 step 4): half the recent shortest-to-longest
+    /// spread, kept between 3 and 5 days (Apple's predictions count as on
+    /// time within ±3: Frond's research), or 3 with fewer than 2 recent gaps.
+    public var grace: Int {
+        let gaps = Self.recentGaps(starts: starts)
+        guard gaps.count >= 2, let lo = gaps.min(), let hi = gaps.max() else { return 3 }
+        return min(5, max(3, Int((Double(hi - lo) / 2).rounded())))
+    }
+
+    /// The estimate a period is past, and by how many days, when today is
+    /// past it with no period logged since (MVCALE-127 step 4). nil when
+    /// it isn't, or with nothing logged.
+    public func overdue(today: CalDate?) -> (due: CalDate, days: Int)? {
+        guard let today, let due = predictedStarts(count: 1).first, today > due else { return nil }
+        return (due, due.days(to: today))
+    }
+
     /// What one day is. `today` bounds an open period: it runs at least its
     /// usual length, and on through today (up to 12 days) until it's ended.
+    ///
+    /// Late (MVCALE-127 step 4): once today is past the next estimate with
+    /// no period logged, the cycle day counts on from the last logged start,
+    /// the missed expected period stays whole (open question 3), and nothing
+    /// is predicted after it: no later periods, no fertile window. After the
+    /// grace period, today's day says by how much (`daysPastEstimate`).
     public func info(on day: CalDate, today: CalDate? = nil) -> CalCycleDayInfo {
+        let late = overdue(today: today)
+        let predicted = late == nil ? predictedStarts() : predictedStarts(count: 1)
         let open = periods.last.flatMap { $0.end == nil ? $0 : nil }
         let inOpen: Bool = {
             guard let open, open.start <= day else { return false }
@@ -386,32 +421,46 @@ public struct CalCycleEstimator: Sendable {
         }()
         let ask = inOpen && day > open!.start.adding(days: periodLength - 1)
         let openHere = inOpen ? open : nil
+        let cd = cycleDay(on: day, today: today)
+        var info = CalCycleDayInfo(kind: nil, cycleDay: cd)
+        if let late, day == today, late.days > grace { info.daysPastEstimate = late.days }
         if let logged = days.last(where: { $0.date == day }), let flow = logged.flow {
-            return CalCycleDayInfo(kind: .logged(flow), cycleDay: cycleDay(on: day), askIfEnded: ask, openPeriod: openHere)
+            info.kind = .logged(flow)
+            info.askIfEnded = ask
+            info.openPeriod = openHere
+            return info
         }
         if inOpen || periods.contains(where: { $0.end != nil && $0.covers(day) }) {
-            return CalCycleDayInfo(kind: .inPeriod, cycleDay: cycleDay(on: day), askIfEnded: ask, openPeriod: openHere)
+            info.kind = .inPeriod
+            info.askIfEnded = ask
+            info.openPeriod = openHere
+            return info
         }
-        let all = starts + predictedStarts()
         // Predicted period days: from each predicted start, for the period's length.
-        for p in predictedStarts() where p <= day && p.days(to: day) < periodLength {
-            return CalCycleDayInfo(kind: .predictedPeriod, cycleDay: cycleDay(on: day))
+        if predicted.contains(where: { $0 <= day && $0.days(to: day) < periodLength }) {
+            info.kind = .predictedPeriod
+            return info
         }
-        // The fertile window of the cycle that holds this day.
+        // The fertile window of the cycle that holds this day. While late,
+        // only the cycles up to the missed estimate have one (nothing is
+        // predicted after it).
+        let all = starts + predicted
         if let next = all.first(where: { $0 > day }) {
             let ovulation = next.adding(days: -14)
             let windowStart = ovulation.adding(days: -5)
             if day >= windowStart && day <= ovulation, starts.contains(where: { $0 <= day }) {
-                return CalCycleDayInfo(kind: .fertile(ovulation: day == ovulation), cycleDay: cycleDay(on: day))
+                info.kind = .fertile(ovulation: day == ovulation)
             }
         }
-        return CalCycleDayInfo(kind: nil, cycleDay: cycleDay(on: day))
+        return info
     }
 
     /// 1-based day of the cycle (from the latest start on or before it,
-    /// logged or predicted).
-    public func cycleDay(on day: CalDate) -> Int? {
-        let all = (starts + predictedStarts()).filter { $0 <= day }
+    /// logged or predicted; while late, `today` past the estimate, logged
+    /// only).
+    public func cycleDay(on day: CalDate, today: CalDate? = nil) -> Int? {
+        let predicted = overdue(today: today) == nil ? predictedStarts() : []
+        let all = (starts + predicted).filter { $0 <= day }
         guard let s = all.last else { return nil }
         return s.days(to: day) + 1
     }
