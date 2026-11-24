@@ -126,6 +126,7 @@ struct PrivateEntryTests {
         #expect(DropMark.kind(.logged(.spotting)) == .spotting)
         #expect(DropMark.kind(.predictedPeriod) == .expected)
         #expect(DropMark.kind(.fertile(ovulation: true)) == nil)
+        #expect(DropMark.kind(.fertilePossible) == nil)
         #expect(DropMark.kind(nil) == nil)
     }
 

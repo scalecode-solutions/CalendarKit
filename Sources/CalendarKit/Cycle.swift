@@ -112,10 +112,17 @@ public struct CalCycleDayInfo: Equatable, Sendable {
         case predictedPeriod
         /// The estimated fertile window (ovulation's day included).
         case fertile(ovulation: Bool)
+        /// Fertility possible (MVCALE-127 step 5): the calendar method's
+        /// wider range around the window, from the person's own shortest and
+        /// longest cycles. Not "safe" outside it: lower chance, not zero.
+        case fertilePossible
     }
     public var kind: Kind?
     /// 1-based day of the cycle, when there's a cycle start before it.
     public let cycleDay: Int?
+    /// A period day that also falls in the fertile window (short cycles:
+    /// the period's mark wins the grid, the day detail says both).
+    public var fertileToo = false
     /// Today, when the period is past its estimate by more than the grace
     /// period with none logged: by how many days (MVCALE-127 step 4). Shown
     /// in the day detail only, never on the grid.
@@ -138,11 +145,14 @@ public struct CalCycleDayInfo: Equatable, Sendable {
     }
 }
 
-/// Estimates from logged days, the calendar method (ACOG): a period starts
-/// on a logged non-spotting day after a gap; the cycle length is the average
-/// of the last up to six cycles, else the person's setting, else 28; the
-/// period length likewise, else 5. Ovulation is about 14 days before the next
-/// start, and the fertile window is the 5 days before it plus that day.
+/// Estimates from logged days, a calendar estimate (cycle-length based, not
+/// ACOG's: MVCALE-127 finding 7): a period starts on a logged non-spotting
+/// day after a gap; the cycle length is the median of the recent cycles, else
+/// the person's setting, else 28; the period length the average, else 5.
+/// Ovulation is 13 days before the next start (Bull 2019; Apple), and the
+/// fertile window is the 5 days before it plus that day. Around it, a wider
+/// "fertility possible" band from the calendar method; while cycles are
+/// unsettled, only that band.
 public struct CalCycleEstimator: Sendable {
     public let days: [CalCycleDay]
     public let settings: CalCycleSettings?
@@ -158,6 +168,10 @@ public struct CalCycleEstimator: Sendable {
     /// start to its marked end, or a run's first to last bleeding day), else
     /// the setting, else 5. An open period doesn't count until it ends.
     public let periodLength: Int
+    /// Cycles aren't settled enough for a confident window (MVCALE-127 step
+    /// 5, open question 5): only the "fertility possible" band shows, and the
+    /// next period is a range. See `isUnsettled`.
+    public let unsettled: Bool
 
     /// Works the periods and both lengths out once: a month on screen asks
     /// about every day, and each answer needs them (MVCALE-127 step 1).
@@ -171,6 +185,7 @@ public struct CalCycleEstimator: Sendable {
         self.starts = starts
         self.cycleLength = Self.cycleLength(starts: starts, settings: settings)
         self.periodLength = Self.periodLength(periods: periods, settings: settings)
+        self.unsettled = Self.isUnsettled(starts: starts)
     }
 
     /// Each period, oldest first (MVCALE-52, MVCALE-127 step 2):
@@ -332,13 +347,16 @@ public struct CalCycleEstimator: Sendable {
     }
 
     /// The gaps since the reset with any month left unlogged dropped.
-    static func keptGaps(_ gaps: [Int]) -> [Int] {
-        guard gaps.count >= 3 else { return gaps }
+    static func keptGaps(_ gaps: [Int]) -> [Int] { keptIndices(gaps).map { gaps[$0] } }
+
+    /// The positions of the gaps kept (see `recentGaps`).
+    static func keptIndices(_ gaps: [Int]) -> [Int] {
+        guard gaps.count >= 3 else { return Array(gaps.indices) }
         let window = Array(gaps.suffix(12))
         var rest = window
         rest.remove(at: rest.firstIndex(of: rest.max()!)!)
         let limit = median(window) + median(changes(rest)) + 15
-        return gaps.filter { Double($0) <= limit }
+        return gaps.indices.filter { Double(gaps[$0]) <= limit }
     }
 
     /// The absolute change from each gap to the next.
@@ -361,6 +379,49 @@ public struct CalCycleEstimator: Sendable {
         if let n = length(h.gaps) { return n }
         if let c = settings?.cycleLength, c > 0 { return c }
         return length(h.before) ?? 28
+    }
+
+    /// Whether cycles are unsettled (Stipe's research, MVCALE-127 Q5):
+    /// - a reset (a gap over 60 days: a birth, the pill, perimenopause) with
+    ///   fewer than 3 cycles since. The first cycles after a birth are often
+    ///   off, and ovulation can come before the first period; or
+    /// - the median change between consecutive cycles, over the last 6 kept,
+    ///   is 9 days or more (the Apple Women's Health Study's alternative
+    ///   rule, 2023; Li 2020, Clue, uses more than 9). Only cycles that were
+    ///   next to each other count as a change: a month left unlogged is
+    ///   dropped first, so it neither makes nor hides a change.
+    static func isUnsettled(starts: [CalDate]) -> Bool {
+        let h = history(starts)
+        if h.reset && h.gaps.count < 3 { return true }
+        guard h.gaps.count >= 3 else { return false }
+        let kept = Set(keptIndices(h.gaps).suffix(6))
+        let pairs = h.gaps.indices.dropLast().filter { kept.contains($0) && kept.contains($0 + 1) }
+        guard !pairs.isEmpty else { return false }
+        return median(pairs.map { abs(h.gaps[$0 + 1] - h.gaps[$0]) }) >= 9
+    }
+
+    /// The cycle days of the "fertility possible" band (MVCALE-127 step 5),
+    /// the calendar method: the shortest recent cycle − 18 through the longest
+    /// − 11, from 3 cycles since the reset; before that, days 8–19 (the
+    /// Standard Days Method), widened to the cycle length − 18 / − 11.
+    public var possibleDays: ClosedRange<Int> {
+        let gaps = Self.recentGaps(starts: starts)
+        if gaps.count >= 3, let lo = gaps.min(), let hi = gaps.max() { return (lo - 18)...(hi - 11) }
+        return min(8, cycleLength - 18)...max(19, cycleLength - 11)
+    }
+
+    /// While unsettled, when the next period may come: the last start plus
+    /// the shortest through the longest recent cycle (from 2 since the
+    /// reset); before that, the setting ± the grace period, else days 21–35.
+    /// Always holding the estimate itself.
+    public var nextRange: ClosedRange<CalDate>? {
+        guard unsettled, let last = starts.last else { return nil }
+        let gaps = Self.recentGaps(starts: starts)
+        var lo: Int, hi: Int
+        if gaps.count >= 2 { (lo, hi) = (gaps.min()!, gaps.max()!) }
+        else if let c = settings?.cycleLength, c > 0 { (lo, hi) = (c - grace, c + grace) }
+        else { (lo, hi) = (21, 35) }
+        return last.adding(days: min(lo, cycleLength))...last.adding(days: max(hi, cycleLength))
     }
 
     static func median(_ xs: [Int]) -> Double {
@@ -394,10 +455,14 @@ public struct CalCycleEstimator: Sendable {
     }
 
     /// The estimate a period is past, and by how many days, when today is
-    /// past it with no period logged since (MVCALE-127 step 4). nil when
-    /// it isn't, or with nothing logged.
+    /// past it with no period logged since (MVCALE-127 step 4). While
+    /// unsettled the estimate is the end of the range shown, not its middle
+    /// (Leaf's and Stipe's review: never past an estimate the card still
+    /// shows as possible). nil when it isn't, or with nothing logged.
     public func overdue(today: CalDate?) -> (due: CalDate, days: Int)? {
-        guard let today, let due = predictedStarts(count: 1).first, today > due else { return nil }
+        guard let today, let estimate = predictedStarts(count: 1).first else { return nil }
+        let due = nextRange?.upperBound ?? estimate
+        guard today > due else { return nil }
         return (due, due.days(to: today))
     }
 
@@ -424,16 +489,28 @@ public struct CalCycleEstimator: Sendable {
         let cd = cycleDay(on: day, today: today)
         var info = CalCycleDayInfo(kind: nil, cycleDay: cd)
         if let late, day == today, late.days > grace { info.daysPastEstimate = late.days }
+        // The fertile window of the cycle that holds this day. While late,
+        // only the cycles up to the missed estimate have one (nothing is
+        // predicted after it); while unsettled, none.
+        let all = starts + predicted
+        let window: (day: CalDate, ovulation: CalDate)? = {
+            guard !unsettled, let next = all.first(where: { $0 > day }), starts.contains(where: { $0 <= day }) else { return nil }
+            let ovulation = next.adding(days: -13)
+            guard day >= ovulation.adding(days: -5) && day <= ovulation else { return nil }
+            return (day, ovulation)
+        }()
         if let logged = days.last(where: { $0.date == day }), let flow = logged.flow {
             info.kind = .logged(flow)
             info.askIfEnded = ask
             info.openPeriod = openHere
+            info.fertileToo = window != nil && flow.startsAPeriod
             return info
         }
         if inOpen || periods.contains(where: { $0.end != nil && $0.covers(day) }) {
             info.kind = .inPeriod
             info.askIfEnded = ask
             info.openPeriod = openHere
+            info.fertileToo = window != nil
             return info
         }
         // Predicted period days: from each predicted start, for the period's length.
@@ -441,16 +518,16 @@ public struct CalCycleEstimator: Sendable {
             info.kind = .predictedPeriod
             return info
         }
-        // The fertile window of the cycle that holds this day. While late,
-        // only the cycles up to the missed estimate have one (nothing is
-        // predicted after it).
-        let all = starts + predicted
-        if let next = all.first(where: { $0 > day }) {
-            let ovulation = next.adding(days: -14)
-            let windowStart = ovulation.adding(days: -5)
-            if day >= windowStart && day <= ovulation, starts.contains(where: { $0 <= day }) {
-                info.kind = .fertile(ovulation: day == ovulation)
-            }
+        if let window {
+            info.kind = .fertile(ovulation: window.day == window.ovulation)
+            return info
+        }
+        // The faint band, by cycle day, in every cycle with a start and a
+        // next one (logged or predicted), the window's own horizon: so not
+        // past a missed estimate, nor past the last prediction (Frond's
+        // review: a lone band there read like the unsettled look).
+        if let cd, possibleDays.contains(cd), all.contains(where: { $0 > day }) {
+            info.kind = .fertilePossible
         }
         return info
     }

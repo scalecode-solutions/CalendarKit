@@ -48,17 +48,20 @@ struct PrivateMarks: Equatable {
         case .predictedPeriod: "period expected"
         case .fertile(ovulation: true): "ovulation expected"
         case .fertile: "fertile window"
+        case .fertilePossible: "fertility possible"
         }
     }
 
     /// Which cycle mark wins a day when more than one person's falls on it:
-    /// logged, then expected period, then ovulation, then the window.
+    /// logged, then expected period, then ovulation, then the window, then
+    /// the faint "fertility possible" band, which never hides another.
     static func rank(_ k: CalCycleDayInfo.Kind) -> Int {
         switch k {
-        case .logged, .inPeriod: 4
-        case .predictedPeriod: 3
-        case .fertile(ovulation: true): 2
-        case .fertile: 1
+        case .logged, .inPeriod: 5
+        case .predictedPeriod: 4
+        case .fertile(ovulation: true): 3
+        case .fertile: 2
+        case .fertilePossible: 1
         }
     }
 }
@@ -113,6 +116,7 @@ enum PrivateIndex {
 struct CycleBand: View {
     let kind: CalCycleDayInfo.Kind
     let height: CGFloat
+    @Environment(\.colorScheme) private var scheme
 
     static let period = Color.pink
     static let fertile = Color.teal
@@ -142,6 +146,10 @@ struct CycleBand: View {
         case .predictedPeriod: CycleBand.period.opacity(0.08)
         case .fertile(ovulation: true): CycleBand.fertile.opacity(0.34)
         case .fertile: CycleBand.fertile.opacity(0.16)
+        // About half the window's teal, no dashes (the dashes mean
+        // "expected period"): MVCALE-127 step 5, picked by eye in light and
+        // dark (dark needs a little more to show at all).
+        case .fertilePossible: CycleBand.fertile.opacity(scheme == .dark ? 0.11 : 0.08)
         }
     }
 }
@@ -536,7 +544,7 @@ struct CycleDaySection: View {
         return VStack(alignment: .leading, spacing: 6) {
             Text(name(person)).font(.subheadline.weight(.semibold))
             if logged != nil || isPeriod {
-                Text(periodLine(logged, info)).font(.body)
+                Text(CycleDaySection.periodLine(logged, info)).font(.body)
                 if !pair.frozen {
                     if info?.askIfEnded == true {
                         // Past the usual length and not ended yet: ask, in the app only.
@@ -565,6 +573,15 @@ struct CycleDaySection: View {
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("cycleEstimate")
             }
+            if est?.unsettled == true, let kind, CycleDaySection.isEstimate(kind) {
+                // MVCALE-127 Q5: say what it is, not why (the partner sees it
+                // too), and never "irregular".
+                Text(CycleDaySection.unsettledLine)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("cycleUnsettled")
+            }
             if let info, let late = CycleDaySection.lateLine(info) {
                 // Both people see it (Travis, 2026-11-24: the pair's same screen).
                 Text(late)
@@ -577,14 +594,28 @@ struct CycleDaySection: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// "Period · day 3", "Period · started", "Spotting".
-    private func periodLine(_ logged: CalCycleDay?, _ info: CalCycleDayInfo?) -> String {
+    /// "Period · day 3", "Period · started", "Spotting"; in a short cycle,
+    /// "Period · day 6 · fertile window" (MVCALE-127 finding 8: the period's
+    /// mark wins the grid, so the day says both).
+    static func periodLine(_ logged: CalCycleDay?, _ info: CalCycleDayInfo?) -> String {
         if logged?.flow == .spotting && logged?.starts != true { return "Spotting" }
         var parts = ["Period"]
         if logged?.starts == true { parts.append("started") }
         else if logged?.ends == true { parts.append("ended") }
         else if let d = info?.cycleDay { parts.append("day \(d)") }
+        if info?.fertileToo == true { parts.append("fertile window") }
         return parts.joined(separator: " · ")
+    }
+
+    /// Under an estimate while cycles are unsettled (MVCALE-127 step 5).
+    static let unsettledLine = "Cycles vary right now, so this is a wider estimate."
+
+    /// An estimated mark (not a logged day).
+    static func isEstimate(_ k: CalCycleDayInfo.Kind) -> Bool {
+        switch k {
+        case .predictedPeriod, .fertile, .fertilePossible: true
+        case .logged, .inPeriod: false
+        }
     }
 
     /// The day before this one was the last.
@@ -614,6 +645,7 @@ struct CycleDaySection: View {
         case .logged, .inPeriod: "drop.fill"
         case .predictedPeriod: "drop"
         case .fertile: "circle.dotted"
+        case .fertilePossible: "circle.dashed"
         }
     }
 
@@ -640,6 +672,9 @@ extension CalFlow {
 /// 11 and 12).
 struct CycleLegend: View {
     static let disclaimer = "Estimates only. Not a medical device or birth control."
+    /// No shading (MVCALE-127 open question 2: in the legend only, so an
+    /// empty day still shows no card). Never "safe".
+    static let lowerChance = "No shading: lower chance, not zero"
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -659,6 +694,9 @@ struct CycleLegend: View {
                     row(band(.predictedPeriod), "Period, expected")
                     row(band(.fertile(ovulation: false)), "Fertile window, expected")
                     row(band(.fertile(ovulation: true)), "Ovulation, expected")
+                    row(band(.fertilePossible), "Fertility possible, estimated")
+                    row(Color.clear.frame(width: 34, height: 18).overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(.secondary.opacity(0.4))),
+                        CycleLegend.lowerChance)
                 } header: {
                     Text("Cycle")
                 } footer: {

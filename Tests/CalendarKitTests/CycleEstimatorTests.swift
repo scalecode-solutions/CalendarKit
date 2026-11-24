@@ -254,17 +254,25 @@ struct CycleEstimatorTests {
         #expect(kind(11, 24) == .predictedPeriod)
         #expect(kind(11, 27) == .predictedPeriod)
         #expect(kind(11, 28) == nil)
-        // Ovulation 14 days before the next start (11-10), the window the 5 days before it.
-        #expect(kind(11, 10) == .fertile(ovulation: true))
-        #expect(kind(11, 5) == .fertile(ovulation: false))
-        #expect(kind(11, 4) == nil)
-        #expect(kind(11, 11) == nil)
-        // A past cycle's window is from its logged next start (9-29 → ovulation 9-15).
-        #expect(kind(9, 15) == .fertile(ovulation: true))
+        // Ovulation 13 days before the next start (11-24 → 11-11: MVCALE-127
+        // step 5, pinned by date), the window the 5 days before it.
+        #expect(kind(11, 11) == .fertile(ovulation: true))
+        #expect(kind(11, 6) == .fertile(ovulation: false))
+        // Around it, fertility possible: 2 cycles logged, so cycle days 8-19
+        // (10-27 is day 1: 11-03..11-05 and 11-12..11-14).
+        #expect(kind(11, 2) == nil)
+        #expect(kind(11, 3) == .fertilePossible)
+        #expect(kind(11, 5) == .fertilePossible)
+        #expect(kind(11, 12) == .fertilePossible)
+        #expect(kind(11, 14) == .fertilePossible)
+        #expect(kind(11, 15) == nil)
+        // A past cycle's window is from its logged next start (9-29 → ovulation 9-16).
+        #expect(kind(9, 16) == .fertile(ovulation: true))
+        #expect(kind(9, 17) == .fertilePossible)
         // Before the first logged start there is no cycle to estimate in.
         #expect(kind(8, 18) == nil)
-        // The predicted cycles after the next one have windows too (12-22 → 12-08).
-        #expect(kind(12, 8) == .fertile(ovulation: true))
+        // The predicted cycles after the next one have windows too (12-22 → 12-09).
+        #expect(kind(12, 9) == .fertile(ovulation: true))
         #expect(kind(12, 22) == .predictedPeriod)
     }
 
@@ -299,12 +307,16 @@ struct CycleEstimatorTests {
         // Nothing after it: no window (12-03..12-08 was one), no period.
         for d in 3...8 { #expect(kind(12, d) == nil) }
         #expect(kind(12, 22) == nil)
-        // The cycle before it keeps its window.
-        #expect(kind(11, 10) == .fertile(ovulation: true))
+        // The cycle before it keeps its window and its band.
+        #expect(kind(11, 11) == .fertile(ovulation: true))
+        #expect(kind(11, 12) == .fertilePossible)
+        // Nor any band after it: 12-01.. would be days 8-19 of a cycle that
+        // hasn't begun.
+        for d in 1...12 { #expect(kind(12, d) == nil) }
         // Without today, or on the estimate itself, nothing changes.
-        #expect(e.info(on: CalDate(2026, 12, 8)).kind == .fertile(ovulation: true))
+        #expect(e.info(on: CalDate(2026, 12, 9)).kind == .fertile(ovulation: true))
         #expect(e.overdue(today: CalDate(2026, 11, 24)) == nil)
-        #expect(e.info(on: CalDate(2026, 12, 8), today: CalDate(2026, 11, 24)).kind == .fertile(ovulation: true))
+        #expect(e.info(on: CalDate(2026, 12, 9), today: CalDate(2026, 11, 24)).kind == .fertile(ovulation: true))
         #expect(e.cycleDay(on: CalDate(2026, 11, 30), today: CalDate(2026, 11, 24)) == 7)
     }
 
@@ -331,6 +343,125 @@ struct CycleEstimatorTests {
         #expect(CalCycleEstimator(days: starts([28]), settings: nil).grace == 3)
     }
 
+    // MARK: the faint band and unsettled cycles (MVCALE-127 step 5)
+
+    /// The band's range: shortest − 18 through longest − 11 from 3 cycles;
+    /// before that, days 8-19 widened by the cycle length.
+    @Test func theFaintBandsRange() {
+        #expect(CalCycleEstimator(days: starts([28, 28]), settings: nil).possibleDays == 8...19)
+        #expect(CalCycleEstimator(days: starts([28, 28, 28]), settings: nil).possibleDays == 10...17)
+        #expect(CalCycleEstimator(days: starts([26, 29, 32]), settings: nil).possibleDays == 8...21)
+        // Long cycles widen the fallback: 35 days, few logged → 8...24.
+        #expect(CalCycleEstimator(days: starts([35]), settings: nil).possibleDays == 8...24)
+        // The audit's varying cycles: days 6-24.
+        #expect(CalCycleEstimator(days: starts([24, 35, 26, 33, 25, 34]), settings: nil).possibleDays == 6...24)
+    }
+
+    /// The band never hides a stronger mark, and always wraps the window:
+    /// steady 28-day cycles (3 logged) show days 10 and 17 faint around the
+    /// window on days 11-16.
+    @Test func theFaintBandWrapsTheWindow() {
+        let e = CalCycleEstimator(days: starts([28, 28, 28]), settings: nil)
+        let last = e.starts.last!
+        func kind(_ cycleDay: Int) -> CalCycleDayInfo.Kind? { e.info(on: last.adding(days: cycleDay - 1)).kind }
+        #expect(kind(9) == nil)
+        #expect(kind(10) == .fertilePossible)
+        #expect(kind(11) == .fertile(ovulation: false))
+        #expect(kind(16) == .fertile(ovulation: true))
+        #expect(kind(17) == .fertilePossible)
+        #expect(kind(18) == nil)
+        // Periods win: a 22-day person's band from day 4 sits under the period.
+        let short = CalCycleEstimator(days: (0..<3).flatMap { k in (0..<7).map { i in
+            CalCycleDay(calendarID: cal, personID: person, date: CalDate(2026, 1, 1).adding(days: 22 * k + i), flow: .medium) } }, settings: nil)
+        #expect(short.info(on: short.starts.last!.adding(days: 3)).kind == .logged(.medium))
+    }
+
+    /// While late, the band stops at the missed estimate too: a band that
+    /// reaches past the usual length (26/30/26/30/44: days 8-33, length 30)
+    /// would otherwise go on into a cycle that hasn't begun.
+    @Test func theBandStopsAtAMissedEstimate() {
+        let e = CalCycleEstimator(days: starts([26, 30, 26, 30, 44]), settings: nil)
+        #expect(!e.unsettled && e.cycleLength == 30 && e.possibleDays == 8...33)
+        let last = e.starts.last!
+        let today = last.adding(days: 40)
+        #expect(e.info(on: last.adding(days: 29), today: today).kind == .fertilePossible) // day 30, before the estimate
+        #expect(e.info(on: last.adding(days: 31), today: today).kind == nil) // day 32, past it
+    }
+
+    /// The band has the window's horizon: no band in a cycle with no next
+    /// start predicted (past the 3rd prediction).
+    @Test func noBandPastTheLastPrediction() {
+        let e = CalCycleEstimator(days: starts([28, 28, 28]), settings: nil)
+        let third = e.predictedStarts().last!
+        #expect(e.info(on: third.adding(days: -28 + 11)).kind == .fertile(ovulation: false)) // the 3rd cycle's window
+        #expect(e.info(on: third.adding(days: 11)).kind == nil) // day 12 after the 3rd predicted start
+        #expect(e.info(on: third.adding(days: 9)).kind == nil) // day 10
+    }
+
+    /// Finding 8: in short cycles the period's mark wins the grid, but the
+    /// day knows it's in the window too.
+    @Test func aPeriodDayInTheWindowSaysSo() {
+        // 22-day cycles, 7-day periods: the window is cycle days 4-9.
+        let days = (0..<3).flatMap { k in (0..<7).map { i in
+            CalCycleDay(calendarID: cal, personID: person, date: CalDate(2026, 1, 1).adding(days: 22 * k + i), flow: .medium) } }
+        let e = CalCycleEstimator(days: days, settings: nil)
+        let next = e.predictedStarts(count: 1).first!
+        let last = e.starts.last!
+        #expect(next == last.adding(days: 22))
+        let inWindow = e.info(on: last.adding(days: 5)) // day 6: ovulation is day 10 (next − 13)
+        #expect(inWindow.kind == .logged(.medium) && inWindow.fertileToo)
+        #expect(!e.info(on: last.adding(days: 1)).fertileToo) // day 2, before the window
+    }
+
+    /// Unsettled: the median change between consecutive cycles is 9 or more
+    /// (an AWHS 2023 alternative; Li 2020 uses more than 9).
+    @Test func unsettledWhenCyclesKeepChanging() {
+        #expect(CalCycleEstimator(days: starts([24, 35, 26, 33, 25, 34]), settings: nil).unsettled) // changes 11, 9, 7, 8, 9: median 9
+        #expect(!CalCycleEstimator(days: starts([24, 32, 26, 33, 25, 33]), settings: nil).unsettled) // 8, 6, 7, 8, 8: median 8
+        #expect(!CalCycleEstimator(days: starts([28, 28, 28]), settings: nil).unsettled)
+        // Fewer than 3 cycles, no reset: not enough to tell.
+        #expect(!CalCycleEstimator(days: starts([22, 38]), settings: nil).unsettled)
+        // A month left unlogged is dropped first, so it doesn't read as a change.
+        #expect(!CalCycleEstimator(days: starts([28, 28, 56, 28]), settings: nil).unsettled)
+        // Only cycles that were next to each other count: in 16, (59 dropped),
+        // 34, 34 the one real change is 0; 16 to 34 across the hole isn't one.
+        #expect(CalCycleEstimator.recentGaps(starts: CalCycleEstimator(days: starts([16, 59, 34, 34]), settings: nil).starts) == [16, 34, 34])
+        #expect(!CalCycleEstimator(days: starts([16, 59, 34, 34]), settings: nil).unsettled)
+    }
+
+    /// After a reset (a gap over 60 days: a birth), fewer than 3 cycles since
+    /// is unsettled, however steady the cycles before it were.
+    @Test func unsettledAfterABirth() {
+        #expect(CalCycleEstimator(days: starts([28, 28, 28, 300]), settings: nil).unsettled)
+        #expect(CalCycleEstimator(days: starts([28, 28, 28, 300, 30, 31]), settings: nil).unsettled)
+        #expect(!CalCycleEstimator(days: starts([28, 28, 28, 300, 30, 31, 29]), settings: nil).unsettled)
+    }
+
+    /// While unsettled: no window and no ovulation day, only the faint band;
+    /// the next period is a range; late only past the range's end.
+    @Test func whileUnsettledOnlyTheBandAndARange() {
+        let e = CalCycleEstimator(days: starts([24, 35, 26, 33, 25, 34]), settings: nil)
+        let last = e.starts.last!
+        #expect(e.cycleLength == 30) // (26 + 33) / 2, rounded
+        for cd in 6...24 { #expect(e.info(on: last.adding(days: cd - 1)).kind == .fertilePossible) }
+        #expect(e.nextRange == last.adding(days: 24)...last.adding(days: 35))
+        // Late counts from the range's end: inside it, nothing is overdue.
+        let end = last.adding(days: 35)
+        #expect(e.overdue(today: end) == nil)
+        #expect(e.overdue(today: end.adding(days: 1))! == (end, 1))
+        // and the line waits for the grace period past it (5 here).
+        #expect(e.info(on: end.adding(days: 5), today: end.adding(days: 5)).daysPastEstimate == nil)
+        #expect(e.info(on: end.adding(days: 6), today: end.adding(days: 6)).daysPastEstimate == 6)
+        // Right after a birth, with nothing since: days 21-35 (no setting).
+        let birth = CalCycleEstimator(days: starts([28, 28, 28, 300]), settings: nil)
+        #expect(birth.nextRange == birth.starts.last!.adding(days: 21)...birth.starts.last!.adding(days: 35))
+        let set = CalCycleSettings(calendarID: cal, personID: person, cycleLength: 30, periodLength: 0)
+        let withSetting = CalCycleEstimator(days: starts([28, 28, 28, 300]), settings: set)
+        #expect(withSetting.nextRange == withSetting.starts.last!.adding(days: 27)...withSetting.starts.last!.adding(days: 33))
+        // Settled: no range.
+        #expect(CalCycleEstimator(days: starts([28, 28, 28]), settings: nil).nextRange == nil)
+    }
+
     @Test func flowsAndStarting() {
         #expect(CalFlow.allCases.filter(\.startsAPeriod) == [.light, .medium, .heavy])
     }
@@ -353,7 +484,7 @@ struct CycleEstimatorTests {
         #expect(e.info(on: CalDate(2026, 10, 4)).kind == .logged(.light))
         #expect(e.info(on: CalDate(2026, 9, 7)).kind == nil)
         // The fertile window still comes from the next start.
-        #expect(e.info(on: CalDate(2026, 9, 15)).kind == .fertile(ovulation: true))
+        #expect(e.info(on: CalDate(2026, 9, 16)).kind == .fertile(ovulation: true))
     }
 
     /// An open period runs its usual length, and on through today until it's

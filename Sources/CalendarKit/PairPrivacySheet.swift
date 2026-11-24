@@ -320,10 +320,18 @@ private struct CycleSettingsSection: View {
 extension CalCycleEstimator {
     /// The settings sheet's "Next period, estimated": "Tue, Dec 22", or
     /// while past it with none logged, "Tue, Nov 24 · not logged yet" rather
-    /// than a date that's gone by (MVCALE-127 step 4). Both people see it.
+    /// than a date that's gone by (MVCALE-127 step 4). While cycles are
+    /// unsettled, the range it may come in: "Dec 3 – Dec 17" (step 5). Both
+    /// people see it.
     func nextPeriodLabel(today: CalDate) -> String? {
         guard let next = predictedStarts(count: 1).first else { return nil }
-        let date = CalFormat.template("EEEMMMd").string(from: next.utcMidnight)
+        let date: String
+        if let range = nextRange {
+            let f = CalFormat.template("MMMd")
+            date = f.string(from: range.lowerBound.utcMidnight) + " – " + f.string(from: range.upperBound.utcMidnight)
+        } else {
+            date = CalFormat.template("EEEMMMd").string(from: next.utcMidnight)
+        }
         return overdue(today: today) == nil ? date : date + " · not logged yet"
     }
 }
