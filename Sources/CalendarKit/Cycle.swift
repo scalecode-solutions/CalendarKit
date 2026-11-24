@@ -137,10 +137,29 @@ public struct CalCycleDayInfo: Equatable, Sendable {
 public struct CalCycleEstimator: Sendable {
     public let days: [CalCycleDay]
     public let settings: CalCycleSettings?
+    /// Each period, oldest first (see `findPeriods`).
+    public let periods: [CalPeriod]
+    /// The first day of each period.
+    public let starts: [CalDate]
+    /// The average of the last up to six cycles, else the setting, else 28.
+    public let cycleLength: Int
+    /// The average length of the last up to six finished periods (a marked
+    /// start to its marked end, or a run's first to last bleeding day), else
+    /// the setting, else 5. An open period doesn't count until it ends.
+    public let periodLength: Int
 
+    /// Works the periods and both lengths out once: a month on screen asks
+    /// about every day, and each answer needs them (MVCALE-127 step 1).
     public init(days: [CalCycleDay], settings: CalCycleSettings?) {
-        self.days = days.filter { !$0.deleted }.sorted { $0.date < $1.date }
+        let days = days.filter { !$0.deleted }.sorted { $0.date < $1.date }
+        self.days = days
         self.settings = settings
+        let periods = Self.findPeriods(days)
+        self.periods = periods
+        let starts = periods.map(\.start)
+        self.starts = starts
+        self.cycleLength = Self.cycleLength(starts: starts, settings: settings)
+        self.periodLength = Self.periodLength(periods: periods, settings: settings)
     }
 
     /// Each period, oldest first (MVCALE-52), from one pass over the days:
@@ -155,7 +174,7 @@ public struct CalCycleEstimator: Sendable {
     /// - Otherwise a marked period stays open until ended, and an unmarked
     ///   one (flows alone, or days logged before marks existed) ends at its
     ///   last bleeding day.
-    public var periods: [CalPeriod] {
+    static func findPeriods(_ days: [CalCycleDay]) -> [CalPeriod] {
         var out: [CalPeriod] = []
         var cur: (start: CalDate, last: CalDate, marked: Bool)?
         func close(end: CalDate?) {
@@ -188,12 +207,7 @@ public struct CalCycleEstimator: Sendable {
         return out
     }
 
-    /// The first day of each period.
-    public var starts: [CalDate] { periods.map(\.start) }
-
-    /// The average of the last up to six cycles, else the setting, else 28.
-    public var cycleLength: Int {
-        let s = starts
+    static func cycleLength(starts s: [CalDate], settings: CalCycleSettings?) -> Int {
         if s.count >= 2 {
             let gaps = zip(s, s.dropFirst()).map { $0.days(to: $1) }.filter { (15...60).contains($0) }.suffix(6)
             if !gaps.isEmpty { return Int((Double(gaps.reduce(0, +)) / Double(gaps.count)).rounded()) }
@@ -202,10 +216,7 @@ public struct CalCycleEstimator: Sendable {
         return 28
     }
 
-    /// The average length of the last up to six finished periods (a marked
-    /// start to its marked end, or a run's first to last bleeding day), else
-    /// the setting, else 5. An open period doesn't count until it ends.
-    public var periodLength: Int {
+    static func periodLength(periods: [CalPeriod], settings: CalCycleSettings?) -> Int {
         let lengths = periods.compactMap { p in p.end.map { p.start.days(to: $0) + 1 } }
         let recent = lengths.suffix(6).filter { (1...12).contains($0) }
         if !recent.isEmpty { return Int((Double(recent.reduce(0, +)) / Double(recent.count)).rounded()) }
