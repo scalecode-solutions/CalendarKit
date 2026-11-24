@@ -154,7 +154,7 @@ public struct CalCycleEstimator: Sendable {
         let days = days.filter { !$0.deleted }.sorted { $0.date < $1.date }
         self.days = days
         self.settings = settings
-        let periods = Self.findPeriods(days)
+        let periods = Self.findPeriods(days, settings: settings)
         self.periods = periods
         let starts = periods.map(\.start)
         self.starts = starts
@@ -162,10 +162,13 @@ public struct CalCycleEstimator: Sendable {
         self.periodLength = Self.periodLength(periods: periods, settings: settings)
     }
 
-    /// Each period, oldest first (MVCALE-52), from one pass over the days:
+    /// Each period, oldest first (MVCALE-52, MVCALE-127 step 2):
     /// - A period begins at a "Period started" mark or at a bleeding day
     ///   (spotting never begins one), unless it's less than 15 days after the
-    ///   last period began (mid-cycle bleeding, not a new period).
+    ///   last period began. Then it's mid-cycle bleeding, and so is the whole
+    ///   bleed it's part of (bleeding days at most 3 days apart): no day of
+    ///   it begins a period, even one past day 15. Only a "Period started"
+    ///   mark at least 15 days after the last start still begins one there.
     /// - It goes on through bleeding days at most 3 days apart; a "Period
     ///   started" mark inside it marks it rather than beginning another.
     /// - A "Period ended" mark within 15 days of its start ends it, whether it
@@ -174,12 +177,49 @@ public struct CalCycleEstimator: Sendable {
     /// - Otherwise a marked period stays open until ended, and an unmarked
     ///   one (flows alone, or days logged before marks existed) ends at its
     ///   last bleeding day.
-    static func findPeriods(_ days: [CalCycleDay]) -> [CalPeriod] {
+    /// - The tie-break: when a bleed that began a period has a rival, a later
+    ///   bleed less than 15 days after it that could have begun one too, the
+    ///   period is the bleed marked "Period started"; else the one with more
+    ///   bleeding days (a 1-day spot never takes a real period's place on
+    ///   nearness alone: Stipe's review); else the one nearer when the period
+    ///   was due (the last start plus the usual cycle length). A bleed on day
+    ///   17 with the real period 12 days later is mid-cycle. Someone who logs
+    ///   only each period's first day has equal 1-day bleeds, so for her it
+    ///   comes down to nearness; a "Period started" mark settles it.
+    static func findPeriods(_ days: [CalCycleDay], settings: CalCycleSettings?) -> [CalPeriod] {
+        // A losing bleed's first day is vetoed and the pass runs again; each
+        // run vetoes one more day, so it ends.
+        var vetoed: Set<CalDate> = []
+        while true {
+            let pass = periodPass(days, vetoed: vetoed)
+            guard let loser = tieBreakLoser(pass, settings: settings) else { return pass.periods }
+            vetoed.insert(loser)
+        }
+    }
+
+    /// A bleed that could begin a period, but came less than 15 days after
+    /// the start of `period` (an index into the periods found).
+    private struct Rival {
+        let period: Int
+        let start: CalDate
+        var marked: Bool
+        /// Its bleeding days.
+        var length: Int
+    }
+
+    private static func periodPass(_ days: [CalCycleDay], vetoed: Set<CalDate>) -> (periods: [CalPeriod], rivals: [Rival], lengths: [Int]) {
         var out: [CalPeriod] = []
-        var cur: (start: CalDate, last: CalDate, marked: Bool)?
+        // Each period's bleeding days, beside `out`.
+        var lengths: [Int] = []
+        var rivals: [Rival] = []
+        var cur: (start: CalDate, last: CalDate, marked: Bool, bled: Int)?
+        // The mid-cycle bleed being skipped: its last day, and the rival it
+        // is, if any.
+        var block: (last: CalDate, rival: Int?)?
         func close(end: CalDate?) {
             guard let c = cur else { return }
             out.append(CalPeriod(start: c.start, end: end ?? (c.marked ? nil : c.last), marked: c.marked))
+            lengths.append(c.bled)
             cur = nil
         }
         for d in days {
@@ -188,23 +228,65 @@ public struct CalCycleEstimator: Sendable {
                 let inRun = c.marked ? c.start.days(to: d.date) < 15 : c.last.days(to: d.date) <= 3
                 if d.ends && c.start.days(to: d.date) < 15 && (inRun || !bleeding) {
                     if bleeding || d.starts { cur?.last = d.date }
+                    if bleeding { cur?.bled += 1 }
                     close(end: d.date)
                     continue
                 }
                 if inRun {
-                    if bleeding { cur?.last = d.date }
+                    if bleeding { cur?.last = d.date; cur?.bled += 1 }
                     if d.starts { cur?.marked = true }
                     continue
                 }
                 if bleeding || d.starts { close(end: nil) } else { continue }
             }
             guard bleeding || d.starts else { continue } // an end, or spotting, on its own
-            if let prev = out.last, prev.start.days(to: d.date) < 15 { continue }
-            cur = (d.date, d.date, d.starts)
+            let sinceLast = out.last.map { $0.start.days(to: d.date) }
+            if let b = block, b.last.days(to: d.date) <= 3 {
+                // Still the mid-cycle bleed, unless a start mark 15+ days on.
+                if !(d.starts && (sinceLast ?? 15) >= 15) {
+                    if bleeding { block?.last = d.date }
+                    if bleeding, let r = b.rival { rivals[r].length += 1 }
+                    if d.starts, let r = b.rival { rivals[r].marked = true }
+                    continue
+                }
+            }
+            if let since = sinceLast, since < 15 || vetoed.contains(d.date) {
+                var rival: Int?
+                if since < 15, out.count >= 2 {
+                    rivals.append(Rival(period: out.count - 1, start: d.date, marked: d.starts, length: bleeding ? 1 : 0))
+                    rival = rivals.count - 1
+                }
+                block = (d.date, rival)
+                continue
+            }
+            block = nil
+            cur = (d.date, d.date, d.starts, bleeding ? 1 : 0)
             if d.ends { close(end: d.date) }
         }
         close(end: nil)
-        return out
+        return (out, rivals, lengths)
+    }
+
+    /// The first day of the earliest period that loses its tie-break, if any.
+    private static func tieBreakLoser(_ pass: (periods: [CalPeriod], rivals: [Rival], lengths: [Int]), settings: CalCycleSettings?) -> CalDate? {
+        let periods = pass.periods
+        for i in periods.indices.dropFirst() {
+            let rivals = pass.rivals.filter { $0.period == i }
+            guard !rivals.isEmpty else { continue }
+            let starts = periods[..<i].map(\.start)
+            let due = starts.last!.adding(days: cycleLength(starts: Array(starts), settings: settings))
+            typealias Bleed = (start: CalDate, marked: Bool, length: Int)
+            func better(_ a: Bleed, than b: Bleed) -> Bool {
+                if a.marked != b.marked { return a.marked }
+                if a.length != b.length { return a.length > b.length }
+                return abs(a.start.days(to: due)) < abs(b.start.days(to: due))
+            }
+            let own: Bleed = (periods[i].start, periods[i].marked, pass.lengths[i])
+            if rivals.contains(where: { better(($0.start, $0.marked, $0.length), than: own) }) {
+                return periods[i].start
+            }
+        }
+        return nil
     }
 
     static func cycleLength(starts s: [CalDate], settings: CalCycleSettings?) -> Int {

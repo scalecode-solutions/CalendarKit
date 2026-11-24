@@ -57,6 +57,94 @@ struct CycleEstimatorTests {
         #expect(e.cycleDay(on: CalDate(2026, 9, 10)) == 10)
     }
 
+    // MARK: whole bleeds and the tie-break (MVCALE-127 step 2)
+
+    /// A run of mid-cycle bleeding is one block: the days of it past day 15
+    /// don't start a period either (the audit's bug 1: this read as a
+    /// 15-day cycle).
+    @Test func aLongMidCycleBleedCrossingDay15IsNotAStart() {
+        let days = period(9, 1, days: 4) + (12...17).map { day(9, $0, .light) } + period(9, 29, days: 4)
+        let e = CalCycleEstimator(days: days, settings: nil)
+        #expect(e.starts == [CalDate(2026, 9, 1), CalDate(2026, 9, 29)])
+        #expect(e.cycleLength == 28)
+        #expect(e.info(on: CalDate(2026, 9, 16)).kind == .logged(.light))
+        #expect(e.cycleDay(on: CalDate(2026, 9, 16)) == 16)
+        // The same with no period logged after it yet.
+        let open = CalCycleEstimator(days: period(9, 1, days: 4) + (12...17).map { day(9, $0, .light) }, settings: nil)
+        #expect(open.starts == [CalDate(2026, 9, 1)])
+    }
+
+    /// Two bleeds that could both begin a period, less than 15 days apart:
+    /// the one nearer when the period was due wins. A bleed on day 17 and
+    /// the real period 12 days later read as a 16-day cycle before.
+    @Test func ofTwoCloseBleedsTheOneNearerTheDueDateIsThePeriod() {
+        let days = period(3, 1, days: 5) + [day(3, 17, .medium), day(3, 18, .light)] + period(3, 29, days: 5)
+        let e = CalCycleEstimator(days: days, settings: nil)
+        #expect(e.starts == [CalDate(2026, 3, 1), CalDate(2026, 3, 29)])
+        #expect(e.cycleLength == 28)
+        #expect(e.periodLength == 5) // the day-17 bleed isn't a period
+        #expect(e.info(on: CalDate(2026, 3, 17)).kind == .logged(.medium))
+
+        // The due date comes from the person's own cycles: 30 days here, so
+        // a bleed on day 24 (6 days early) loses to one on day 35 (4 days
+        // late). Against the default 28 it would have won.
+        var starts = [CalDate(2026, 1, 1)]
+        for _ in 0..<3 { starts.append(starts.last!.adding(days: 30)) } // 1-31, 3-2, 4-1
+        let history = starts.flatMap { s in (0..<4).map { CalCycleDay(calendarID: cal, personID: person, date: s.adding(days: $0), flow: .medium) } }
+        let last = starts.last!
+        let early = CalCycleDay(calendarID: cal, personID: person, date: last.adding(days: 23), flow: .medium)
+        let real = (0..<4).map { CalCycleDay(calendarID: cal, personID: person, date: last.adding(days: 34 + $0), flow: .heavy) }
+        let f = CalCycleEstimator(days: history + [early] + real, settings: nil)
+        #expect(f.starts.last == last.adding(days: 34))
+    }
+
+    /// The tie-break's first rule: a bleed marked "Period started" wins over
+    /// an unmarked one, even when the unmarked one is nearer the due date.
+    @Test func ofTwoCloseBleedsAMarkedStartWins() {
+        let days = period(3, 1, days: 5) + [day(3, 27, .medium), day(3, 28, .light)]
+            + [mark(4, 6, starts: true, flow: .heavy), mark(4, 7, flow: .medium)]
+        let e = CalCycleEstimator(days: days, settings: nil)
+        #expect(e.starts == [CalDate(2026, 3, 1), CalDate(2026, 4, 6)])
+        // The mark may come on a later day of the bleed: the bleed still
+        // wins, and begins on its first day (a mark inside a period marks it).
+        let later = period(3, 1, days: 5) + [day(3, 27, .medium), day(3, 28, .light)]
+            + [mark(4, 5, flow: .heavy), mark(4, 6, starts: true, flow: .medium)]
+        let l = CalCycleEstimator(days: later, settings: nil)
+        #expect(l.starts == [CalDate(2026, 3, 1), CalDate(2026, 4, 5)])
+        #expect(l.periods.last?.marked == true)
+    }
+
+    /// The tie-break's second rule (Stipe's review, Travis): the bleed with
+    /// more bleeding days wins before nearness does, so a 1-day spot never
+    /// takes a real period's place. A real 17-day cycle keeps its period.
+    @Test func ofTwoCloseBleedsTheLongerWins() {
+        let history = period(1, 1, days: 4) + period(1, 29, days: 4) + period(2, 26, days: 4)
+        // A 5-day period on 3-15 (a 17-day cycle), then a 1-day bleed on
+        // 3-25, the day before it was due.
+        let short = CalCycleEstimator(days: history + period(3, 15, days: 5) + [day(3, 25, .light)], settings: nil)
+        #expect(short.starts.last == CalDate(2026, 3, 15))
+        // The mirror: a 1-day bleed on day 17, then the real 5-day period.
+        let spot = CalCycleEstimator(days: history + [day(3, 15, .light)] + period(3, 26, days: 5), settings: nil)
+        #expect(spot.starts.last == CalDate(2026, 3, 26))
+        // Equal lengths fall through to nearness: logging only each period's
+        // first day, the spot nearer the due date (3-26) wins. A mark
+        // settles it (the known edge).
+        let firstDays = [day(1, 1), day(1, 29), day(2, 26), day(3, 15), day(3, 25)]
+        #expect(CalCycleEstimator(days: firstDays, settings: nil).starts.last == CalDate(2026, 3, 25))
+        let marked = [day(1, 1), day(1, 29), day(2, 26), mark(3, 15, starts: true, flow: .heavy), day(3, 25)]
+        #expect(CalCycleEstimator(days: marked, settings: nil).starts.last == CalDate(2026, 3, 15))
+    }
+
+    /// A "Period started" mark at least 15 days after the last start begins
+    /// a period even inside a mid-cycle block.
+    @Test func aStartMarkInsideABleedStillBeginsAPeriod() {
+        let days = period(9, 1, days: 4) + (12...16).map { day(9, $0, .light) }
+            + [mark(9, 17, starts: true, flow: .medium), mark(9, 18, flow: .medium)]
+        let e = CalCycleEstimator(days: days, settings: nil)
+        #expect(e.starts == [CalDate(2026, 9, 1), CalDate(2026, 9, 17)])
+        #expect(e.periods.last?.marked == true)
+    }
+
     @Test func lengthsAreTheAveragesOfWhatWasLogged() {
         let e = CalCycleEstimator(days: regular, settings: CalCycleSettings(calendarID: cal, personID: person, cycleLength: 35, periodLength: 8))
         #expect(e.cycleLength == 28) // measured wins over the setting
