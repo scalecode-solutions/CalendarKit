@@ -151,6 +151,60 @@ struct CycleEstimatorTests {
         #expect(e.periodLength == 4) // (4 + 5 + 4) / 3 rounded; spotting doesn't count
     }
 
+    // MARK: odd gaps, resets and the median (MVCALE-127 step 3)
+
+    private func starts(_ gaps: [Int]) -> [CalCycleDay] {
+        var s = [CalDate(2026, 1, 1)]
+        for g in gaps { s.append(s.last!.adding(days: g)) }
+        return s.map { CalCycleDay(calendarID: cal, personID: person, date: $0, flow: .heavy) }
+    }
+
+    private func kept(_ gaps: [Int]) -> [Int] {
+        CalCycleEstimator.recentGaps(starts: CalCycleEstimator(days: starts(gaps), settings: nil).starts)
+    }
+
+    /// A month left unlogged (28, 28, 56) isn't a 56-day cycle: it's dropped
+    /// once there are 3 gaps to judge it by (the audit's bug 3: this read as
+    /// 37).
+    @Test func aMonthLeftUnloggedIsDropped() {
+        #expect(CalCycleEstimator(days: starts([28, 28, 56]), settings: nil).cycleLength == 28)
+        #expect(kept([28, 28, 56]) == [28, 28])
+        #expect(kept([28, 28, 56, 28]) == [28, 28, 28])
+        #expect(kept([28, 28, 45, 28]) == [28, 28, 28]) // over 28 + 0 + 15
+        // With only 2 gaps there's nothing to judge by yet (open question 4).
+        #expect(CalCycleEstimator(days: starts([28, 56]), settings: nil).cycleLength == 42)
+    }
+
+    /// Real cycles are kept, short or long: an 18 in a 28-day person, and
+    /// the long ones of someone whose cycles vary.
+    @Test func realCyclesAreKept() {
+        #expect(kept([28, 28, 18]) == [28, 28, 18])
+        #expect(CalCycleEstimator(days: starts([28, 28, 18]), settings: nil).cycleLength == 28)
+        #expect(kept([24, 35, 26, 33, 25, 34]) == [24, 35, 26, 33, 25, 34])
+        #expect(kept([28, 28, 43, 28]) == [28, 28, 43, 28]) // right at 28 + 0 + 15
+    }
+
+    /// The median, not the mean, once there are 3 gaps: one long cycle pulls
+    /// it less (26, 27, 35: the mean is 29).
+    @Test func theMedianOfTheRecentCycles() {
+        #expect(CalCycleEstimator(days: starts([26, 27, 35]), settings: nil).cycleLength == 27)
+        #expect(CalCycleEstimator(days: starts([26, 27, 35, 30]), settings: nil).cycleLength == 29) // (27 + 30) / 2, rounded
+        #expect(CalCycleEstimator(days: starts([28, 33]), settings: nil).cycleLength == 31) // the mean, with 2
+    }
+
+    /// A gap over 60 days (a birth, months on the pill) ends the old
+    /// history: the cycles after it are the ones that count.
+    @Test func aLongGapResetsTheHistory() {
+        #expect(CalCycleEstimator(days: starts([28, 28, 28, 120, 33]), settings: nil).cycleLength == 33)
+        #expect(kept([28, 28, 28, 120, 33]) == [33])
+        let h = CalCycleEstimator.history(CalCycleEstimator(days: starts([28, 28, 28, 120]), settings: nil).starts)
+        #expect(h.reset && h.gaps.isEmpty && h.before == [28, 28, 28])
+        // Nothing since: the setting, else the cycles before, else 28.
+        #expect(CalCycleEstimator(days: starts([30, 30, 30, 120]), settings: nil).cycleLength == 30)
+        let set = CalCycleSettings(calendarID: cal, personID: person, cycleLength: 32, periodLength: 0)
+        #expect(CalCycleEstimator(days: starts([30, 30, 30, 120]), settings: set).cycleLength == 32)
+    }
+
     @Test func onlyTheLastSixCyclesCount() {
         // Starts 40, 40, then six 26-day cycles apart.
         var starts = [CalDate(2026, 1, 1)]

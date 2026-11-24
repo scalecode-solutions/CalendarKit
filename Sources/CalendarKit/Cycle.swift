@@ -141,7 +141,9 @@ public struct CalCycleEstimator: Sendable {
     public let periods: [CalPeriod]
     /// The first day of each period.
     public let starts: [CalDate]
-    /// The average of the last up to six cycles, else the setting, else 28.
+    /// The median of the last up to six cycles since the latest reset, a
+    /// month left unlogged left out (the mean with fewer than three), else
+    /// the setting, else the cycles before the reset, else 28.
     public let cycleLength: Int
     /// The average length of the last up to six finished periods (a marked
     /// start to its marked end, or a run's first to last bleeding day), else
@@ -289,13 +291,73 @@ public struct CalCycleEstimator: Sendable {
         return nil
     }
 
-    static func cycleLength(starts s: [CalDate], settings: CalCycleSettings?) -> Int {
-        if s.count >= 2 {
-            let gaps = zip(s, s.dropFirst()).map { $0.days(to: $1) }.filter { (15...60).contains($0) }.suffix(6)
-            if !gaps.isEmpty { return Int((Double(gaps.reduce(0, +)) / Double(gaps.count)).rounded()) }
+    /// The gaps between starts that can be cycles, since the latest reset
+    /// (MVCALE-127 step 3):
+    /// - a gap over 60 days (a pregnancy, months on the pill, months not
+    ///   logged) ends the old history: only the gaps after it count, and
+    ///   `before` keeps the older ones (Stipe's research);
+    /// - a gap under 15 days isn't a cycle.
+    static func history(_ s: [CalDate]) -> (gaps: [Int], reset: Bool, before: [Int]) {
+        var gaps: [Int] = [], before: [Int] = [], reset = false
+        for g in zip(s, s.dropFirst()).map({ $0.days(to: $1) }) {
+            if g > 60 {
+                before += gaps
+                gaps = []
+                reset = true
+            } else if g >= 15 {
+                gaps.append(g)
+            }
         }
+        return (gaps, reset, before)
+    }
+
+    /// The recent gaps the cycle length is taken from: with 3 or more, a gap
+    /// longer than the median gap + the median change between consecutive
+    /// gaps + 15 days is a month left unlogged and is dropped (the Apple
+    /// Women's Health Study's artifact rule, Frond's research; the change is
+    /// measured with the longest gap left out, or that gap would hide itself
+    /// among few). Then the last 6. With fewer than 3 there's nothing to
+    /// judge by.
+    static func recentGaps(_ gaps: [Int]) -> [Int] {
+        Array(keptGaps(gaps).suffix(6))
+    }
+
+    /// The gaps since the reset with any month left unlogged dropped.
+    static func keptGaps(_ gaps: [Int]) -> [Int] {
+        guard gaps.count >= 3 else { return gaps }
+        let window = Array(gaps.suffix(12))
+        var rest = window
+        rest.remove(at: rest.firstIndex(of: rest.max()!)!)
+        let limit = median(window) + median(changes(rest)) + 15
+        return gaps.filter { Double($0) <= limit }
+    }
+
+    /// The absolute change from each gap to the next.
+    static func changes(_ gaps: [Int]) -> [Int] {
+        zip(gaps, gaps.dropFirst()).map { abs($1 - $0) }
+    }
+
+    static func recentGaps(starts: [CalDate]) -> [Int] { recentGaps(history(starts).gaps) }
+
+    /// The median of the recent gaps (the mean with fewer than 3), else the
+    /// setting, else the gaps from before the latest reset, else 28.
+    static func cycleLength(starts s: [CalDate], settings: CalCycleSettings?) -> Int {
+        func length(_ all: [Int]) -> Int? {
+            let gaps = recentGaps(all)
+            guard !gaps.isEmpty else { return nil }
+            let avg = all.count >= 3 ? median(gaps) : Double(gaps.reduce(0, +)) / Double(gaps.count)
+            return Int(avg.rounded())
+        }
+        let h = history(s)
+        if let n = length(h.gaps) { return n }
         if let c = settings?.cycleLength, c > 0 { return c }
-        return 28
+        return length(h.before) ?? 28
+    }
+
+    static func median(_ xs: [Int]) -> Double {
+        let s = xs.sorted()
+        let m = s.count / 2
+        return s.count % 2 == 1 ? Double(s[m]) : Double(s[m - 1] + s[m]) / 2
     }
 
     static func periodLength(periods: [CalPeriod], settings: CalCycleSettings?) -> Int {
